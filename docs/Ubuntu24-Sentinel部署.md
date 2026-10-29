@@ -4,7 +4,9 @@
 
 `compose.sentinel.yaml` 为独立配置，项目 `goofish-monitor`、服务 app，**本地源码 Dockerfile.sentinel 构建**，不使用上游预构建应用镜像。默认只发布 `127.0.0.1:8000`，通过 SSH 隧道访问；不增加公网监听或端口转发。不要与旧 Compose 或 LAN Compose 叠加，不要同时启动同一项目的两种部署。
 
-此前 Caddy 局域网网关改造已随 master 合入，本分支完整保留。本配置不自动替代或修改服务器的 compose.local.yaml，也不自动迁移 LAN 网关。如果已运行该网关，应由本地 Codex 保留其 app 无宿主机端口和 gateway 绑定，只在审查后改用此 Fork 构建的新应用镜像；不要合并 Compose 端口列表。
+此前 Caddy 局域网网关改造已随 master 合入，本分支完整保留。已经部署该网关的服务器可使用额外提供的独立 `compose.sentinel.lan.yaml`：app 从 Fork 源码构建且不发布端口，gateway 沿用相同 Caddy digest、认证文件与指定 LAN 绑定。不自动改写 compose.local.yaml、网关凭据或防火墙，禁止将两份 Compose 叠加。
+
+原 `scripts/lan.py` 专用于固定远程 digest 的网关迁移，不能用于本地源码构建镜像的升级：本地镜像通常没有 RepoDigest。源码版升级按本文备份和启动方法执行，保留原脚本及受限备份，不能伪造 digest 来绕过预检查。
 
 ## 新环境
 
@@ -54,6 +56,24 @@ python3 scripts/sentinel_backup.py --database data/app.sqlite3 --backup-dir .sen
 6. 只有备份完整才运行 `docker compose -f compose.sentinel.yaml up -d --no-build app`。首次启动自动执行添加新表的迁移，不 DROP 或清空旧表、不改旧任务模式。网关部署请按前述独立方案保留端口约束，不直接使用这里的回环发布替换它。
 7. 验证健康、服务端登录、旧任务与历史价格数量、账号文件哈希，之后再创建暂停的市场任务检查页面。确认仅 app 所属项目受影响，其他容器 ID/StartedAt 不变。
 8. 正式启用真实追踪前在平台许可范围内进行低频人工验收，验证线上字段与 Fixture 一致、登录态有效；不得用绕过风控的方式验证。先暂停通知，检查无 LLM 配置也能运行。通过后由用户决定何时恢复已有任务与通知。
+
+## 已有 LAN 网关的源码升级命令
+
+先执行上节的暂停、真实配置核对、受限备份和旧镜像保留步骤；确认 `.lan/gateway.env` 与 `.lan/credentials.json` 完整且 0600，LAN_BIND_IP 是本机地址。使用以下**单独文件**，两个 env-file 分别加载原应用变量和已存在的网关哈希，不覆盖它们：
+
+```bash
+cd /home/o0521/ai-goofish-monitor
+docker compose --env-file .env --env-file .lan/gateway.env \
+  -f compose.sentinel.lan.yaml build app
+docker compose --env-file .env --env-file .lan/gateway.env \
+  -f compose.sentinel.lan.yaml up -d --no-build app gateway
+docker compose --env-file .env --env-file .lan/gateway.env \
+  -f compose.sentinel.lan.yaml ps
+```
+
+此配置只由 gateway 发布 `${LAN_BIND_IP:-192.168.9.202}:${LAN_PORT:-8000}:80`，不额外发布 app 端口，不改变其他项目。不要绑定 0.0.0.0；目标 IP 不属于本机、端口冲突或没有现成网关配置时停止，由本地 Codex 先检查，不创建/重置凭据。新版本需要网关认证后再使用应用服务端会话登录。宿主机 `.env` 中若仍使用弱应用密码，先通过安全编辑器修改为独立强密码，不能用网关认证替代应用认证。
+
+旧部署如果尚未启用 LAN 网关，使用前面的回环配置即可；如需首次迁移网关，仍应先按照已有 LAN 方案审查和备份，不能把此升级命令当作首次数据迁移工具。重启后任务计划与签名密钥继续由原 data/ 持久化。
 
 ## 回滚
 

@@ -121,3 +121,22 @@ asyncio.run(main())
         (tmp_path/'docker-fixture.log').write_text(result.stdout+result.stderr)
         subprocess.run(['docker','--host=unix:///var/run/docker.sock','rm','-f',name],capture_output=True)
         subprocess.run(['docker','--host=unix:///var/run/docker.sock','network','rm',network],capture_output=True)
+
+
+@pytest.mark.skipif(os.environ.get('SENTINEL_DOCKER_TESTS')!='1',reason='opt-in Compose CLI')
+def test_source_lan_compose_keeps_gateway_only_binding(tmp_path):
+    fixture=tmp_path/'lan'
+    fixture.mkdir()
+    shutil.copy(ROOT/'compose.sentinel.lan.yaml',fixture/'compose.sentinel.lan.yaml')
+    (fixture/'.env').write_text('WEB_USERNAME=fixture-admin\nWEB_PASSWORD=offline-fixture-password\n')
+    gateway=fixture/'gateway.env'
+    hashed='$2a$14$'+'a'*53  # redacted syntax fixture, never used to authenticate
+    gateway.write_text("GATEWAY_USERNAME='lanadmin'\nGATEWAY_PASSWORD_HASH='"+hashed+"'\n")
+    model=json.loads(docker('compose','--project-directory',str(fixture),'--env-file',str(fixture/'.env'),
+                            '--env-file',str(gateway),'-f',str(fixture/'compose.sentinel.lan.yaml'),'config','--format','json'))
+    app,proxy=model['services']['app'],model['services']['gateway']
+    assert 'ports' not in app
+    assert app['build']['dockerfile']=='Dockerfile.sentinel'
+    assert proxy['ports']==[{'mode':'ingress','host_ip':'192.168.9.202','target':80,'published':'8000','protocol':'tcp'}]
+    assert proxy['environment']['GATEWAY_PASSWORD_HASH']==hashed.replace('$','$$')
+    assert proxy['image'].endswith('@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d')

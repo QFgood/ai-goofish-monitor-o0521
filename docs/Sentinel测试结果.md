@@ -2,15 +2,15 @@
 
 日期：2026-10-30（Asia/Shanghai）。功能分支：`feat/goofish-sentinel-v1`，从本 Fork 的 `77f8d758` 开发，交付前同步了 master 的 `f8256f2e`（已合入 LAN 网关 PR #1），保留原有局域网配置。
 
-**最终结果：175 项 Python 测试通过，3 项 live 外部服务测试按任务要求排除，0 失败、0 跳过；2 项前端单元测试通过；TypeScript/Vite 生产构建通过；本地源码 Docker 镜像构建与实际容器冒烟通过。**
+**最终结果：195 项 Python 测试通过（含主分支新增的19项 LAN 网关回归及1项源码 LAN 配置检查），3 项 live 外部服务测试按任务要求排除，0 失败、0 跳过；2 项前端单元测试通过；TypeScript/Vite 生产构建通过；本地源码 Docker 镜像构建与实际容器冒烟通过。**
 
 ## 命令与结果
 
 ```bash
 # 仓库 requirements.txt 安装在独立虚拟环境，无需真实 Cookie 或 API Key。
-SENTINEL_BROWSER_TESTS=1 SENTINEL_DOCKER_TESTS=1 SENTINEL_CAPTURE_SCREENSHOTS=1 \
+RUN_LAN_DOCKER_TESTS=1 SENTINEL_BROWSER_TESTS=1 SENTINEL_DOCKER_TESTS=1 \
   python -m pytest -m 'not live and not live_slow' -q
-# 175 passed, 3 deselected in 14.16s
+# 195 passed, 3 deselected in 28.18s
 
 npm --prefix web-ui run test:market
 # 2 passed, 0 failed
@@ -26,10 +26,10 @@ docker build -f Dockerfile.sentinel \
   --secret id=proxy_bundle,src=/etc/ssl/certs/ca-certificates.crt \
   -t goofish-sentinel:cloud-test .
 # 构建成功，最终本地 image ID：
-# sha256:6981b0a76021b1b4a0e04b90c8fb8a170a78ddd7816431fccc2ecf1878376485
+# sha256:13b7d70f8f2803ae613e9c8466b23b50c8369e342824754d522e7113a2ddf4e6
 ```
 
-Cloud 使用 Python 3.12、Docker Engine 28.4.0、Compose 2.40.3。运行 API TestClient、Node worker、Chromium 和 Docker 时需要 Cloud 本地执行权限；普通 sandbox 事件循环测试会停滞，已诊断并使用授权本地执行环境运行，没有将停滞标为成功。宿主机不支持这些能力时，测试 opt-in 会显式跳过，不应声称执行通过。本次两个 opt-in 都实际开启。
+Cloud 使用 Python 3.12、Docker Engine 28.4.0、Compose 2.40.3。运行 API TestClient、Node worker、Chromium 和 Docker 时需要 Cloud 本地执行权限；普通 sandbox 事件循环测试会停滞，已诊断并使用授权本地执行环境运行，没有将停滞标为成功。宿主机不支持这些能力时，测试 opt-in 会显式跳过，不应声称执行通过。本次 Sentinel 的两个 opt-in 以及 RUN_LAN_DOCKER_TESTS 均实际开启。
 
 ## 分阶段验证
 
@@ -37,7 +37,7 @@ Cloud 使用 Python 3.12、Docker Engine 28.4.0、Compose 2.40.3。运行 API Te
 2. Phase 2：25 项市场测试通过，包括卖家分组、持久化认领、崩溃租约恢复、登录失效暂停与原始状态适配。
 3. Phase 3：34 项市场/统计/服务端认证 API 测试通过，包括金额语义、去重、空样本、分页、CSV、跨站写入和 WebSocket 权限。
 4. Phase 4：前端 TypeScript 与生产构建通过；真实 Chromium 完成登录、配置选择、不同配置比较、价格曲线、商品历史、移动端无页面溢出、深色模式和新建任务入口检查，未发现未处理的页面 JS 异常。
-5. Phase 5：补充完整 MVP 流程、租约并发隔离、浏览器失败重排、旧任务与 SQLite 备份、501 行 CSV 分页流式导出和 Docker 重启测试，最终全部合跑为上述结果。
+5. Phase 5：补充完整 MVP 流程、租约并发隔离、浏览器失败重排、旧任务与 SQLite 备份、501 行 CSV 分页流式导出和 Docker 重启测试，同步主分支 LAN 网关改动后，重新合跑为上述195项结果。
 
 ## 核心证据
 
@@ -52,7 +52,7 @@ Cloud 使用 Python 3.12、Docker Engine 28.4.0、Compose 2.40.3。运行 API Te
 | SQLite | 迁移重复执行保留原 tasks/price_snapshots/app_metadata；外键检查通过；删除市场任务保留商品/观察历史；SQLite backup 文件 0600 且原数据可读，缺源拒绝初始化 |
 | 身份认证 | 未登录的新旧 API 401；弱默认密码拒绝登录；HttpOnly/Strict Cookie；篡改/过期 Cookie 拒绝；登录限速；跨站写入 403；未认证和跨站 WebSocket 拒绝；有效会话可连接 |
 | 通知 | Mock 渠道验证每日摘要去重、空样本不编造价格；不调用真实企业微信或其他外部渠道 |
-| Docker | 原始 Compose 展开仅发布 127.0.0.1:8000、九项挂载、健康检查；源码构建、无 privileged/host 网络/socket；真实 UID 1000 运行；Chromium 在非 root 容器打开 data URL；未认证 API 401；重启后市场任务、回访计划、签名密钥与登录会话仍在 |
+| Docker | 回环源码 Compose 仅发布 127.0.0.1:8000；新增独立源码 LAN Compose 只有 gateway 绑定指定 LAN IP，app 无宿主机端口；九项挂载、健康检查；源码构建、无 privileged/host 网络/socket；真实 UID 1000 运行；Chromium 在非 root 容器打开 data URL；未认证 API 401；重启后市场任务、回访计划、签名密钥与登录会话仍在 |
 | 源码一致性 | 容器中 market_runner、market_statistics_service、item_lifecycle_service 的 SHA256 与当前工作区相同，避免误测旧上游镜像 |
 | 前端 | Native SVG 对 null 断线，不补零；分转换为元；真实 Chromium 桌面与移动截图均来自明确标注的离线 Fixture |
 
