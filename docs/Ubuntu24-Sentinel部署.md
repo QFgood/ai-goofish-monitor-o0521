@@ -4,7 +4,7 @@
 
 `compose.sentinel.yaml` 为独立配置，项目 `goofish-monitor`、服务 app，**本地源码 Dockerfile.sentinel 构建**，不使用上游预构建应用镜像。默认只发布 `127.0.0.1:8000`，通过 SSH 隧道访问；不增加公网监听或端口转发。不要与旧 Compose 或 LAN Compose 叠加，不要同时启动同一项目的两种部署。
 
-此前 Caddy 局域网网关改造是独立 PR。本配置不自动替代或修改服务器的 compose.local.yaml，也不自动迁移 LAN 网关。如果已运行该网关，应由本地 Codex 保留其 app 无宿主机端口和 gateway 绑定，只在审查后改用此 Fork 构建的新应用镜像；不要合并 Compose 端口列表。
+此前 Caddy 局域网网关改造已随 master 合入，本分支完整保留。本配置不自动替代或修改服务器的 compose.local.yaml，也不自动迁移 LAN 网关。如果已运行该网关，应由本地 Codex 保留其 app 无宿主机端口和 gateway 绑定，只在审查后改用此 Fork 构建的新应用镜像；不要合并 Compose 端口列表。
 
 ## 新环境
 

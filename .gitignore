@@ -16,10 +16,12 @@ prompts/
 price_history/
 data/
 
-# Sentinel operational secrets and restricted database backups
-.sentinel-backups/
-*.credentials.json
-.session_secret
-compose.local.yaml
+# Local LAN gateway secrets, migration journal and restricted backups
 .lan/
 .lan-backups/
+compose.local.yaml
+*.credentials.json
+
+# Sentinel operational secrets and restricted database backups
+.sentinel-backups/
+.session_secret

@@ -1,6 +1,6 @@
 # Goofish Sentinel v1.0 Cloud 测试结果
 
-日期：2026-10-30（Asia/Shanghai）。功能分支：`feat/goofish-sentinel-v1`，从本 Fork 的 master 基线 `77f8d758` 开发，未合入独立的 LAN 网关 PR。
+日期：2026-10-30（Asia/Shanghai）。功能分支：`feat/goofish-sentinel-v1`，从本 Fork 的 `77f8d758` 开发，交付前同步了 master 的 `f8256f2e`（已合入 LAN 网关 PR #1），保留原有局域网配置。
 
 **最终结果：175 项 Python 测试通过，3 项 live 外部服务测试按任务要求排除，0 失败、0 跳过；2 项前端单元测试通过；TypeScript/Vite 生产构建通过；本地源码 Docker 镜像构建与实际容器冒烟通过。**
 

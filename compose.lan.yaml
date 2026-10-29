@@ -1,0 +1,52 @@
+# Standalone deployment; never combine with another Compose file.
+name: goofish-monitor
+services:
+  app:
+    image: ${APP_IMAGE:?Run scripts/lan.py apply to pin the installed image digest}
+    pull_policy: never
+    container_name: ${APP_CONTAINER_NAME:-ai-goofish-monitor-app}
+    init: true
+    shm_size: ${APP_SHM_SIZE:-1gb}
+    env_file:
+      - .env
+    environment:
+      APP_DATABASE_FILE: /app/data/app.sqlite3
+    volumes:
+      - ./.env:/app/.env
+      - ./data:/app/data
+      - ./state:/app/state
+      - ./prompts:/app/prompts
+      - ./logs:/app/logs
+      - ./images:/app/images
+      - ./jsonl:/app/jsonl
+      - ./price_history:/app/price_history
+      - ./config.json:/app/config.json
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: ${APP_LOG_MAX_SIZE:-10m}
+        max-file: ${APP_LOG_MAX_FILE:-3}
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+  gateway:
+    image: caddy:2.11.2-alpine@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d
+    pull_policy: if_not_present
+    ports:
+      - "${LAN_BIND_IP:-192.168.9.202}:${LAN_PORT:-8000}:80"
+    environment:
+      NO_PROXY: app,localhost,127.0.0.1
+      GATEWAY_USERNAME: ${GATEWAY_USERNAME:?Missing gateway username}
+      GATEWAY_PASSWORD_HASH: ${GATEWAY_PASSWORD_HASH:?Missing bcrypt hash}
+    volumes:
+      - ./deploy/lan/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
