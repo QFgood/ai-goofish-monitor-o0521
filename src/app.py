@@ -3,7 +3,7 @@
 整合所有路由和服务
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -17,6 +17,7 @@ from src.api.routes import (
     login_state,
     websocket,
     accounts,
+    market,
 )
 from src.api.dependencies import (
     set_process_service,
@@ -83,15 +84,27 @@ async def lifespan(app: FastAPI):
     await scheduler_service.reload_jobs(tasks_list)
     scheduler_service.start()
 
+    market_runner = None
+    if app is not None:
+        from src.infrastructure.persistence.market_repository import MarketRepository
+        from src.services.market_runner import MarketRunner
+        from src.services.notification_service import build_notification_service
+        market_runner = MarketRunner(MarketRepository(), notifier=build_notification_service().send_notification)
+        app.state.market_runner = market_runner
+        market_runner.start()
     print("应用启动完成")
 
-    yield
+    try:
+        yield
+    finally:
+        if market_runner:
+            await market_runner.stop()
 
-    # 关闭时
-    print("正在关闭应用...")
-    scheduler_service.stop()
-    await process_service.stop_all()
-    print("应用已关闭")
+        # Shut down legacy services even when lifespan exits with an error.
+        print("正在关闭应用...")
+        scheduler_service.stop()
+        await process_service.stop_all()
+        print("应用已关闭")
 
 
 # 创建 FastAPI 应用
@@ -112,6 +125,9 @@ app.include_router(results.router)
 app.include_router(login_state.router)
 app.include_router(websocket.router)
 app.include_router(accounts.router)
+app.include_router(market.router)
+from src.api import auth
+app.add_middleware(auth.APIAuthenticationMiddleware)
 
 # 挂载静态文件
 # 旧的静态文件目录（用于截图等）
@@ -142,11 +158,34 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/auth/status")
-async def auth_status(payload: LoginRequest):
-    """检查认证状态"""
-    if payload.username == app_settings.web_username and payload.password == app_settings.web_password:
-        return {"authenticated": True, "username": payload.username}
+async def auth_status(payload: LoginRequest, request: Request, response: Response):
+    """Keep the existing response contract and issue a server-validated session."""
+    import hmac
+    if not auth.same_origin(request):
+        raise HTTPException(403, "跨站登录已拒绝")
+    auth.check_login_rate(request)
+    if not auth.credentials_ready():
+        raise HTTPException(503, "请先设置至少12位的非默认 WEB_PASSWORD")
+    current = auth.config.settings
+    if (hmac.compare_digest(payload.username.encode(), current.web_username.encode())
+            and hmac.compare_digest(payload.password.encode(), current.web_password.encode())):
+        response.set_cookie(auth.COOKIE, auth.issue_session(current.web_username), max_age=auth.TTL,
+                            httponly=True, samesite='strict', secure=request.url.scheme == 'https')
+        return {"authenticated": True, "username": current.web_username}
     raise HTTPException(status_code=401, detail="认证失败")
+
+
+@app.get('/auth/session')
+async def auth_session(request: Request):
+    return {'authenticated': True, 'username': auth.require_user(request)}
+
+
+@app.post('/auth/logout')
+async def auth_logout(request: Request, response: Response):
+    if not auth.same_origin(request):
+        raise HTTPException(403, '跨站退出已拒绝')
+    response.delete_cookie(auth.COOKIE, httponly=True, samesite='strict')
+    return {'authenticated': False}
 
 
 # 主页路由 - 服务 Vue 3 SPA

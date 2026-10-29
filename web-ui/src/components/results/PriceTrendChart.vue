@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { trendPath } from '@/utils/marketChart'
 import { useI18n } from 'vue-i18n'
 
 interface TrendPoint {
@@ -10,6 +11,7 @@ interface TrendPoint {
 
 const props = defineProps<{
   points: TrendPoint[]
+  series?: Array<{ key: string; label: string; color: string; values: Array<number | null>; counts: number[] }>
 }>()
 const { t } = useI18n()
 
@@ -68,10 +70,41 @@ const areaPath = computed(() => {
   const baseline = chartHeight - padding
   return `${avgPath.value} L ${lastX} ${baseline} L ${firstX} ${baseline} Z`
 })
+const marketValues = computed(() => props.series?.flatMap(s => s.values).filter((v): v is number => v !== null && Number.isFinite(v)) || [])
+const marketRange = computed(() => {
+  const values = marketValues.value
+  const min = values.length ? Math.min(...values) : 0
+  const max = values.length ? Math.max(...values) : 1
+  return { min: min === max ? min - 1 : min, max: min === max ? max + 1 : max }
+})
+const marketX = (index: number) => padding + index * (chartWidth - padding * 2) / Math.max(1, props.points.length - 1)
+const marketY = (value: number) => chartHeight - padding - (value-marketRange.value.min) / (marketRange.value.max-marketRange.value.min) * (chartHeight-padding*2)
 </script>
 
 <template>
   <div class="app-surface-subtle p-4">
+    <template v-if="series">
+      <div class="flex flex-wrap gap-4 text-sm mb-3">
+        <span v-for="line in series" :key="line.key" :style="{color: line.color}">{{ line.label }}</span>
+      </div>
+      <p v-if="marketValues.length === 0" class="py-12 text-center text-slate-500">暂无有效样本，价格保留为空；请等待采集或调整日期。</p>
+      <svg v-else :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="w-full h-[240px]" role="img" aria-label="市场价格曲线（元），空值处断开">
+        <text :x="padding" y="14" font-size="11" fill="currentColor">{{ marketRange.max.toFixed(0) }} 元</text>
+        <text :x="padding" :y="chartHeight-25" font-size="11" fill="currentColor">{{ marketRange.min.toFixed(0) }} 元</text>
+        <g v-for="line in series" :key="line.key">
+          <path :d="trendPath(line.values, marketX, marketY)" fill="none" :stroke="line.color" stroke-width="2.5" />
+          <template v-for="(value, index) in line.values" :key="index">
+            <circle v-if="value !== null" :cx="marketX(index)" :cy="marketY(value)" r="4" :fill="line.color" tabindex="0">
+              <title>{{ points[index]?.day }} · {{ line.label }} · ¥{{ value }} · 样本 {{ line.counts[index] || 0 }} 件</title>
+            </circle>
+          </template>
+        </g>
+        <template v-for="(point,index) in points" :key="point.day">
+          <text v-if="index % Math.max(1,Math.ceil(points.length/7)) === 0 || index === points.length-1" :x="marketX(index)" :y="chartHeight-3" text-anchor="middle" font-size="11" fill="currentColor">{{ point.day.slice(5) }}</text>
+        </template>
+      </svg>
+    </template>
+    <template v-else>
     <div class="mb-3 flex flex-col gap-3 text-xs uppercase tracking-[0.22em] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
       <span>Daily Price Curve</span>
       <div class="flex items-center gap-3">
@@ -131,5 +164,6 @@ const areaPath = computed(() => {
         </g>
       </svg>
     </div>
+    </template>
   </div>
 </template>

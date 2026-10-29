@@ -8,7 +8,8 @@ import {
   Layers, 
   Terminal, 
   Settings2,
-  ChevronRight
+  ChevronRight,
+  TrendingUp
 } from 'lucide-vue-next'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useI18n } from 'vue-i18n'
@@ -24,6 +25,7 @@ const navItems = computed(() => [
   { to: '/tasks', label: t('sidebar.tasks'), icon: ListTodo },
   { to: '/accounts', label: t('sidebar.accounts'), icon: Users },
   { to: '/results', label: t('sidebar.results'), icon: Layers },
+  { to: '/market', label: '市场行情', icon: TrendingUp },
   { to: '/logs', label: t('sidebar.logs'), icon: Terminal },
   { to: '/settings', label: t('sidebar.settings'), icon: Settings2 },
 ])

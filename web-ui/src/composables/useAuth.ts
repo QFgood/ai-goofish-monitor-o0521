@@ -5,6 +5,7 @@ import { wsService } from '@/services/websocket'
 // Global State
 const username = ref<string | null>(localStorage.getItem('auth_username'))
 const isLoggedIn = ref(localStorage.getItem('auth_logged_in') === 'true')
+let sessionCheck: Promise<void> | null = null
 
 export function useAuth() {
   const router = useRouter()
@@ -23,6 +24,7 @@ export function useAuth() {
   }
 
   function logout() {
+    void fetch('/auth/logout', { method: 'POST' }).catch(() => {})
     username.value = null
     isLoggedIn.value = false
     localStorage.removeItem('auth_username')
@@ -39,6 +41,19 @@ export function useAuth() {
     }
   }
 
+  async function checkSession(): Promise<void> {
+    if (!sessionCheck) sessionCheck = (async () => {
+      try {
+        const response = await fetch('/auth/session')
+        if (response.ok) { const data = await response.json(); setAuthenticated(data.username); return }
+      } catch { /* API requests will still fail closed when offline. */ }
+      username.value = null; isLoggedIn.value = false
+      localStorage.removeItem('auth_username'); localStorage.removeItem('auth_logged_in')
+      wsService.stop()
+    })()
+    await sessionCheck
+  }
+
   async function login(user: string, pass: string): Promise<boolean> {
     try {
       const response = await fetch('/auth/status', {
@@ -53,11 +68,14 @@ export function useAuth() {
         setAuthenticated(user)
         return true
       } else {
+        if (response.status === 503 || response.status === 429) {
+          const detail = await response.json()
+          throw new Error(detail.detail || '登录暂不可用')
+        }
         return false
       }
     } catch (e) {
-      console.error('Login error', e)
-      return false
+      throw e
     }
   }
 
@@ -65,6 +83,7 @@ export function useAuth() {
     username,
     isAuthenticated,
     login,
+    checkSession,
     logout
   }
 }

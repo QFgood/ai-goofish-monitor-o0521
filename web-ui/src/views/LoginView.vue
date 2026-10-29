@@ -37,7 +37,7 @@ async function handleLogin() {
       error.value = t('login.errors.invalidCredentials')
     }
   } catch (e) {
-    error.value = t('login.errors.unexpected')
+    error.value = e instanceof Error ? e.message : t('login.errors.unexpected')
   } finally {
     isLoading.value = false
   }

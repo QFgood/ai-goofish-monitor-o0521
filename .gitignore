@@ -15,3 +15,11 @@ prompts/
 .serena/
 price_history/
 data/
+
+# Sentinel operational secrets and restricted database backups
+.sentinel-backups/
+*.credentials.json
+.session_secret
+compose.local.yaml
+.lan/
+.lan-backups/

@@ -17,6 +17,10 @@ async def websocket_endpoint(
     websocket: WebSocket,
 ):
     """WebSocket 端点"""
+    from src.api.auth import session_user, same_origin
+    if not session_user(websocket) or not same_origin(websocket):
+        await websocket.close(code=4401)
+        return
     # 接受连接
     await websocket.accept()
     active_connections.add(websocket)

@@ -1,0 +1,47 @@
+# Standalone local-source deployment. Do not merge with other Compose files.
+name: goofish-monitor
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.sentinel
+    image: goofish-sentinel:1.0
+    pull_policy: never
+    user: "${SENTINEL_UID:-1000}:${SENTINEL_GID:-1000}"
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SENTINEL_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      APP_DATABASE_FILE: /app/data/app.sqlite3
+      WEB_USERNAME: ${WEB_USERNAME:?Set an application username in .env}
+      WEB_PASSWORD: ${WEB_PASSWORD:?Set a unique application password of at least 12 characters}
+      TZ: Asia/Shanghai
+      RUN_HEADLESS: "true"
+      RUNNING_IN_DOCKER: "true"
+    volumes:
+      - ./.env:/app/.env
+      - ./data:/app/data
+      - ./state:/app/state
+      - ./prompts:/app/prompts
+      - ./config.json:/app/config.json
+      - ./logs:/app/logs
+      - ./images:/app/images
+      - ./jsonl:/app/jsonl
+      - ./price_history:/app/price_history
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
