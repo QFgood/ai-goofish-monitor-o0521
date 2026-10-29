@@ -10,6 +10,7 @@ const enUS = {
     en: 'English',
   },
   routes: {
+    market: 'Market tracking',
     login: 'Login',
     dashboard: 'Dashboard',
     tasks: 'Tasks',

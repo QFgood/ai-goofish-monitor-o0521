@@ -333,7 +333,7 @@ def _load_all_result_records_sync(
 ) -> list[dict]:
     bootstrap_sqlite_storage()
     with sqlite_connection() as conn:
-        return _load_filtered_records_from_conn(
+        records = _load_filtered_records_from_conn(
             conn,
             filename=filename,
             ai_recommended_only=ai_recommended_only,
@@ -342,6 +342,10 @@ def _load_all_result_records_sync(
             sort_order=sort_order,
             include_hidden=include_hidden,
         )
+
+    # Bulk loading/export returns stored records; UI-only visibility fields belong to paginated queries.
+    visibility_fields = {"_status", "_matched_blacklist_keywords", "_hidden_reason", "_effective_hidden"}
+    return [{key: value for key, value in record.items() if key not in visibility_fields} for record in records]
 
 
 async def build_result_ndjson(filename: str) -> str:

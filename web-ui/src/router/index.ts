@@ -41,6 +41,12 @@ const routes = [
         meta: { titleKey: 'routes.results', requiresAuth: true },
       },
       {
+        path: 'market',
+        name: 'Market',
+        component: () => import('@/views/MarketView.vue'),
+        meta: { titleKey: 'routes.market', requiresAuth: true },
+      },
+      {
         path: 'logs',
         name: 'Logs',
         component: () => import('@/views/LogsView.vue'),
@@ -75,8 +81,9 @@ function updateDocumentTitle() {
   document.title = titleKey ? `${t(titleKey)} - ${appName}` : appName
 }
 
-router.beforeEach((to, _from, next) => {
-  const { isAuthenticated } = useAuth()
+router.beforeEach(async (to, _from, next) => {
+  const { isAuthenticated, checkSession } = useAuth()
+  await checkSession()
 
   if (to.meta.requiresAuth && !isAuthenticated.value) {
     next({ name: 'Login', query: { redirect: to.fullPath } })

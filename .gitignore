@@ -21,3 +21,7 @@ data/
 .lan-backups/
 compose.local.yaml
 *.credentials.json
+
+# Sentinel operational secrets and restricted database backups
+.sentinel-backups/
+.session_secret

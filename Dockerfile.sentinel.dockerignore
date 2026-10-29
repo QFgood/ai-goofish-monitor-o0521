@@ -1,0 +1,19 @@
+# Explicit source-only allowlist: never send host cookies, databases or .env.
+**
+!Dockerfile.sentinel
+!requirements-runtime.txt
+!spider_v2.py
+!config.json.example
+!prompts/
+!prompts/base_prompt.txt
+!prompts/macbook_criteria.txt
+!src/
+!src/**
+!web-ui/
+!web-ui/**
+!static/
+!static/**
+web-ui/node_modules/
+web-ui/dist/
+src/**/__pycache__/
+**/*.pyc

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:market": "node --test tests/market-chart.test.mjs"
   },
   "dependencies": {
     "@vueuse/core": "^14.1.0",
