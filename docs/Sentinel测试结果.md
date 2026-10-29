@@ -2,7 +2,7 @@
 
 日期：2026-10-30（Asia/Shanghai）。功能分支：`feat/goofish-sentinel-v1`，从本 Fork 的 `77f8d758` 开发，交付前同步了 master 的 `f8256f2e`（已合入 LAN 网关 PR #1），保留原有局域网配置。
 
-**最终结果：195 项 Python 测试通过（含主分支新增的19项 LAN 网关回归及1项源码 LAN 配置检查），3 项 live 外部服务测试按任务要求排除，0 失败、0 跳过；2 项前端单元测试通过；TypeScript/Vite 生产构建通过；本地源码 Docker 镜像构建与实际容器冒烟通过。**
+**最终结果：196 项 Python 测试通过（含主分支新增的19项 LAN 网关回归及1项源码 LAN 配置检查），3 项 live 外部服务测试按任务要求排除，0 失败、0 跳过；2 项前端单元测试通过；TypeScript/Vite 生产构建通过；本地源码 Docker 镜像构建与实际容器冒烟通过。**
 
 ## 命令与结果
 
@@ -10,7 +10,7 @@
 # 仓库 requirements.txt 安装在独立虚拟环境，无需真实 Cookie 或 API Key。
 RUN_LAN_DOCKER_TESTS=1 SENTINEL_BROWSER_TESTS=1 SENTINEL_DOCKER_TESTS=1 \
   python -m pytest -m 'not live and not live_slow' -q
-# 195 passed, 3 deselected in 28.18s
+# 196 passed, 3 deselected in 25.36s
 
 npm --prefix web-ui run test:market
 # 2 passed, 0 failed
@@ -37,7 +37,7 @@ Cloud 使用 Python 3.12、Docker Engine 28.4.0、Compose 2.40.3。运行 API Te
 2. Phase 2：25 项市场测试通过，包括卖家分组、持久化认领、崩溃租约恢复、登录失效暂停与原始状态适配。
 3. Phase 3：34 项市场/统计/服务端认证 API 测试通过，包括金额语义、去重、空样本、分页、CSV、跨站写入和 WebSocket 权限。
 4. Phase 4：前端 TypeScript 与生产构建通过；真实 Chromium 完成登录、配置选择、不同配置比较、价格曲线、商品历史、移动端无页面溢出、深色模式和新建任务入口检查，未发现未处理的页面 JS 异常。
-5. Phase 5：补充完整 MVP 流程、租约并发隔离、浏览器失败重排、旧任务与 SQLite 备份、501 行 CSV 分页流式导出和 Docker 重启测试，同步主分支 LAN 网关改动后，重新合跑为上述195项结果。
+5. Phase 5：补充完整 MVP 流程、租约并发隔离、浏览器失败重排、明确下架后重新上架、旧任务与 SQLite 备份、501 行 CSV 分页流式导出和 Docker 重启测试，同步主分支 LAN 网关改动后，重新合跑为上述196项结果。
 
 ## 核心证据
 

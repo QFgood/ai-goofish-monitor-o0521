@@ -182,3 +182,18 @@ def test_first_sold_observation_cannot_invent_a_listing_or_transaction_price(mar
     assert result['first_listed_price'] is None
     assert result['sold_reference_price'] is None
     assert result['actual_transaction_price'] is None
+
+
+def test_explicit_offline_then_relisted_is_not_a_sale(market):
+    repo, _, task, service=market
+    service.discover(task['id'],sample(),'first','2026-10-01T08:30:00+08:00')
+    service.observe('1001','offline',raw_status='adapter_offline_text',evidence='explicit_offline',at='2026-10-02T09:30:00+08:00')
+    assert item(repo)['listing_status']=='offline'
+    assert item(repo)['first_seen_sold_at'] is None
+    service.observe('1001','relisted',raw_status=0,price='2700',at='2026-10-03T09:30:00+08:00')
+    assert item(repo)['listing_status']=='active'
+    assert item(repo)['last_listing_price']==270000
+    with repo.connection() as conn:
+        changes=conn.execute('SELECT old_status,new_status FROM market_status_events ORDER BY id').fetchall()
+    assert ('active','offline') in [tuple(r) for r in changes]
+    assert ('offline','active') in [tuple(r) for r in changes]
