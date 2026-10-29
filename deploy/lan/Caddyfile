@@ -1,0 +1,11 @@
+{
+	auto_https off
+	admin off
+}
+
+http://:80 {
+	basic_auth {
+		{$GATEWAY_USERNAME} {$GATEWAY_PASSWORD_HASH}
+	}
+	reverse_proxy app:8000
+}

@@ -15,3 +15,9 @@ prompts/
 .serena/
 price_history/
 data/
+
+# Local LAN gateway secrets, migration journal and restricted backups
+.lan/
+.lan-backups/
+compose.local.yaml
+*.credentials.json
