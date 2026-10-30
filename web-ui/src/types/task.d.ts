@@ -12,6 +12,10 @@ export interface Task {
   min_price: string | null;
   max_price: string | null;
   cron: string | null;
+  revisit_enabled?: boolean;
+  revisit_cron?: string;
+  revisit_limit?: number;
+  revisit_days?: number;
   next_run_at?: string | null;
   ai_prompt_base_file: string;
   ai_prompt_criteria_file: string;
@@ -66,6 +70,10 @@ export interface TaskGenerateRequest {
   max_price?: string | null;
   max_pages?: number;
   cron?: string | null;
+  revisit_enabled?: boolean;
+  revisit_cron?: string;
+  revisit_limit?: number;
+  revisit_days?: number;
   account_state_file?: string | null;
   account_strategy?: 'auto' | 'fixed' | 'rotate';
   free_shipping?: boolean;

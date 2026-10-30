@@ -23,6 +23,7 @@ EXPORT_HEADERS = [
     "性价比分数",
     "性价比标签",
     "商品链接",
+    "平台商品状态", "卖家ID", "首次登记日期", "首次确认已售日期", "已售页展示价", "回访结果",
 ]
 
 
@@ -55,6 +56,12 @@ def build_results_csv(records: list[dict]) -> str:
                 "性价比分数": ai_analysis.get("value_score", price_insight.get("deal_score", "")),
                 "性价比标签": ai_analysis.get("value_summary", price_insight.get("deal_label", "")),
                 "商品链接": item.get("商品链接", ""),
+                "平台商品状态": (record.get('listing_tracking') or {}).get('listing_status', 'unconfirmed'),
+                "卖家ID": (record.get('listing_tracking') or {}).get('seller_id') or seller.get('卖家ID',''),
+                "首次登记日期": (record.get('listing_tracking') or {}).get('first_seen_at',''),
+                "首次确认已售日期": (record.get('listing_tracking') or {}).get('first_seen_sold_at',''),
+                "已售页展示价": ((record.get('listing_tracking') or {}).get('sold_display_price') or 0)/100 or '',
+                "回访结果": (record.get('listing_tracking') or {}).get('last_result',''),
             }
         )
 

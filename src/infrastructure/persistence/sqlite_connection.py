@@ -145,6 +145,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_result_items_status(conn)
     from src.infrastructure.persistence.market_schema import migrate_market
     migrate_market(conn)
+    from src.infrastructure.persistence.result_revisit_schema import migrate_result_revisits
+    migrate_result_revisits(conn)
     conn.commit()
 
 

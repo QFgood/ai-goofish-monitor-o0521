@@ -78,6 +78,12 @@ if __import__('os').path.exists(jar.filename):
     assert len(request('/api/market/tasks')['items'])==1
     jobs=request('/api/market/revisits')['items']
     assert len(jobs)==1 and jobs[0]['status']=='pending'
+    task=request('/api/tasks')[0]
+    assert task['revisit_enabled'] is True and task['revisit_limit']==2 and task['enabled'] is False
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    with sqlite_connection() as conn:
+        assert conn.execute('SELECT count(*) FROM result_listing_memberships').fetchone()[0]==1
+        assert conn.execute('SELECT seller_id FROM result_listing_items').fetchone()[0]=='889999'
 else:
     try: request('/api/market/tasks')
     except urllib.error.HTTPError as exc: assert exc.code==401
@@ -93,12 +99,20 @@ else:
     manager.update_task(task['task']['id'],{'enabled':True})
     ItemLifecycleService(repo).discover(task['task']['id'],{'item_id':'880001','title':'Offline fixture','price':'1234','seller_id':'880099'},'docker-fixture')
     manager.pause_all()
+    ordinary=request('/api/tasks/',{'task_name':'Docker bounded offline','keyword':'bounded-fixture',
+        'decision_mode':'keyword','keyword_rules':['mini'],'enabled':False,'revisit_enabled':True,'revisit_limit':2})
+    from src.services.result_storage_service import save_result_record
+    import asyncio
+    asyncio.run(save_result_record({'任务ID':ordinary['task']['id'],'任务名称':'Docker bounded offline',
+        '商品信息':{'商品ID':'889001','商品标题':'Offline Fixture','当前售价':'5000',
+            '商品链接':'https://www.goofish.com/item?id=889001'},'卖家信息':{'卖家ID':'889999','卖家昵称':'Offline seller'}},'bounded-fixture'))
     jar.save(ignore_discard=True)
 """
         docker('exec','-i',name,'python','-',input=client_script)
         assert (fixture/'data/.session_secret').stat().st_mode & 0o777==0o600
         assert docker('exec',name,'id','-u').strip()=='1000'
-        for module in ['src/app.py','src/api/auth.py','src/api/routes/results.py','src/services/result_price_summary_service.py']:
+        for module in ['src/app.py','src/api/auth.py','src/api/routes/results.py','src/services/result_price_summary_service.py','src/services/result_revisit_service.py',
+                       'src/infrastructure/persistence/result_revisit_schema.py']:
             expected=hashlib.sha256((ROOT/module).read_bytes()).hexdigest()
             code=f"import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/{module}').read_bytes()).hexdigest())"
             assert docker('exec',name,'python','-c',code).strip()==expected

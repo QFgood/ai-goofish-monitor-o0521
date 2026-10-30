@@ -193,3 +193,24 @@ def test_delete_task_stops_runtime_and_reindexes_process_state(
     process_service = api_context["process_service"]
     assert process_service.stopped == [0]
     assert process_service.reindexed == []
+
+
+def test_revisit_settings_creation_update_and_delete_preserves_registered_results(api_client,api_context,sample_task_payload,monkeypatch,tmp_path):
+    from src.services.result_storage_service import save_result_record
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('APP_DATABASE_FILE',str(api_context['db_path']))
+    payload={**sample_task_payload,'revisit_enabled':True,'revisit_cron':'0 20 * * *','revisit_limit':3,'revisit_days':15}
+    created=api_client.post('/api/tasks/',json=payload).json()['task']
+    assert created['revisit_limit']==3 and created['revisit_cron']=='0 20 * * *'
+    asyncio.run(save_result_record({'任务名称':created['task_name'],'商品信息':{'商品ID':'99001',
+        '商品标题':'offline fixture','当前售价':'5000','商品链接':'https://www.goofish.com/item?id=99001'}},created['keyword']))
+    status=api_client.get(f"/api/tasks/{created['id']}/revisits").json()
+    assert status['registered']==1
+    assert api_client.patch(f"/api/tasks/{created['id']}",json={'revisit_limit':101}).status_code==422
+    updated=api_client.patch(f"/api/tasks/{created['id']}",json={'revisit_enabled':False}).json()['task']
+    assert updated['revisit_enabled'] is False and updated['revisit_cron']=='0 20 * * *'
+    assert api_client.delete(f"/api/tasks/{created['id']}").status_code==200
+    with sqlite_connection() as conn:
+        assert conn.execute('SELECT count(*) FROM result_items').fetchone()[0]==1
+        assert conn.execute('SELECT archived FROM result_listing_memberships').fetchone()[0]==1

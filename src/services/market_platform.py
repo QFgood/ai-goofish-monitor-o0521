@@ -158,7 +158,7 @@ class PlaywrightMarketAdapter:
         finally:
             await page.close()
 
-    async def seller_items(self, seller_id):
+    async def seller_items(self, seller_id, max_pages=5):
         page = await self.context.new_page()
         aggregate = SellerListing()
         try:
@@ -166,14 +166,14 @@ class PlaywrightMarketAdapter:
                 await page.goto('https://www.goofish.com/personal?' + urlencode({'userId': seller_id}), wait_until='domcontentloaded', timeout=25000)
             await self.check_access(page)
             response = await info.value
-            for _ in range(5):
+            for page_index in range(max_pages):
                 if not response.ok:
                     raise PlatformAccessError('seller_http_failed')
                 current = await parse_seller_listing(await response.json())
                 aggregate.items.extend(current.items)
                 aggregate.request_ok = aggregate.page_complete = True
                 aggregate.list_complete = current.list_complete
-                if current.list_complete:
+                if current.list_complete or page_index + 1 >= max_pages:
                     break
                 await asyncio.sleep(self.delay)
                 async with page.expect_response(lambda r: 'mtop.idle.web.xyh.item.list' in r.url, timeout=8000) as info:
@@ -188,3 +188,55 @@ class PlaywrightMarketAdapter:
         finally:
             await page.close()
             await asyncio.sleep(self.delay)
+
+    async def item_listing(self, item_id):
+        """One registered item page plus a cached, single seller-list page; no search."""
+        page = await self.context.new_page()
+        try:
+            async with page.expect_response(lambda r: DETAIL_API_URL_PATTERN in r.url, timeout=20000) as info:
+                await page.goto('https://www.goofish.com/item?' + urlencode({'id': item_id}),
+                                wait_until='domcontentloaded', timeout=25000)
+            await self.check_access(page)
+            response = await info.value
+            if not response.ok:
+                raise PlatformAccessError('detail_http_failed')
+            observation = parse_item_listing(await response.json(), item_id)
+            seller = str(observation.get('seller_id') or '')
+            if not seller.isdigit() or len(seller)>40:
+                return {**observation, 'raw_status': None, 'evidence': 'seller_id_pending'}
+            # Existing seller-list contract is known; detail itemStatus codes may
+            # differ, so never interpret those numeric codes as a sale by themselves.
+            cache = getattr(self, '_result_seller_cache', None)
+            if cache is None:
+                self._result_seller_cache = cache = {}
+            if seller not in cache:
+                cache[seller] = await self.seller_items(seller, max_pages=1)
+            listing = cache[seller]
+            found = next((i for i in listing.items if str(i['item_id'])==str(item_id)), None)
+            raw = found.get('raw_status') if found and listing.request_ok and listing.page_complete else None
+            return {**observation, 'raw_status': raw,
+                    'source': 'seller_item_list+item_detail',
+                    'evidence': 'explicit_seller_status_and_detail_price' if raw is not None else 'seller_item_unconfirmed'}
+        except BrowserTimeout:
+            await self.check_access(page)
+            return {'request_ok': False, 'page_complete': False, 'evidence': 'detail_timeout'}
+        finally:
+            await page.close()
+            await asyncio.sleep(self.delay)
+
+
+def parse_item_listing(data, expected_id):
+    """Read price/identity only; detail numeric statuses are never sale evidence.
+
+    Sale status comes from the existing seller-list adapter's explicit 0/1
+    contract. Live response fields still require authorized manual verification.
+    """
+    validate_payload(data)
+    item = data.get('data', {}).get('itemDO')
+    seller = data.get('data', {}).get('sellerDO') or {}
+    if not isinstance(item, dict) or str(item.get('itemId') or '') != str(expected_id):
+        raise PlatformAccessError('detail_item_contract_changed')
+    return {'request_ok': True, 'page_complete': True, 'raw_status': None,
+            'price': item.get('soldPrice') if item.get('soldPrice') is not None else item.get('price'),
+            'seller_id': seller.get('sellerId'), 'seller_nickname': seller.get('nick'),
+            'source': 'item_detail', 'evidence': 'explicit_detail_item_status'}

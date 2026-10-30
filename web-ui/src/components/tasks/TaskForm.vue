@@ -129,6 +129,7 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       min_price: undefined,
       max_price: undefined,
       cron: '',
+      revisit_enabled: false, revisit_cron: '30 9 * * *', revisit_limit: 20, revisit_days: 30,
       account_strategy: props.defaultAccount ? 'fixed' : 'auto',
       account_state_file: props.defaultAccount || AUTO_ACCOUNT_VALUE,
       free_shipping: true,
@@ -155,6 +156,10 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
     cronMode.value = isPresetCronValue(cronVal) ? 'preset' : 'custom'
   }
 
+  form.value.revisit_enabled ??= false
+  form.value.revisit_cron ??= '30 9 * * *'
+  form.value.revisit_limit ??= 20
+  form.value.revisit_days ??= 30
   accountStrategy.value = form.value.account_strategy || (props.defaultAccount ? 'fixed' : 'auto')
   selectedAccountStateFile.value =
     form.value.account_state_file || props.defaultAccount || AUTO_ACCOUNT_VALUE
@@ -260,6 +265,16 @@ function handleSubmit() {
 <template>
   <form id="task-form" @submit.prevent="handleSubmit">
     <div class="grid gap-6 py-4">
+      <fieldset class="rounded-xl border border-slate-200 p-4 space-y-3">
+        <legend class="px-2 font-medium">已登记商品回访</legend>
+        <label class="flex items-center gap-2"><input v-model="form.revisit_enabled" type="checkbox" />启用定时回访</label>
+        <p class="text-xs text-slate-500">只检查该任务已登记的商品链接，不重新搜索。新商品从次日开始；已售停止回访。时间为上海时区。</p>
+        <div v-if="form.revisit_enabled" class="grid gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2"><Label for="revisit-cron">回访定时规则（Cron）</Label><Input id="revisit-cron" v-model="form.revisit_cron" placeholder="30 9 * * *" required /><p class="text-xs text-slate-500 mt-1">默认每天09:30；例如 0 20 * * * 为每天20:00。</p></div>
+          <div><Label for="revisit-limit">每次最多检查商品数</Label><Input id="revisit-limit" v-model.number="form.revisit_limit" type="number" min="1" max="100" required /></div>
+          <div><Label for="revisit-days">追踪天数</Label><Input id="revisit-days" v-model.number="form.revisit_days" type="number" min="1" max="365" required /></div>
+        </div>
+      </fieldset>
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="task-name" class="sm:text-right">{{ t('tasks.form.taskName') }}</Label>
         <Input id="task-name" v-model="form.task_name" class="sm:col-span-3" :placeholder="t('tasks.form.taskNamePlaceholder')" required />

@@ -66,6 +66,9 @@ export interface PriceInsight {
 }
 
 export interface ResultInsights {
+  listing_state?: 'active' | 'sold';
+  revisit_runs?: Array<{run_id:string; task_name:string|null; started_at:string; status:string; reviewed:number; sold:number}>;
+  missing_price_count?: number;
   price_distribution?: Array<{ min_price: number; max_price: number; count: number; item_ids: string[] }>;
   price_filter?: { excluded_count: number; low_price_threshold: number | null; rule: string };
   summary_scope?: string;
@@ -99,6 +102,9 @@ export interface ResultInsights {
 }
 
 export interface ResultItem {
+  listing_tracking?: { item_id:string; seller_id:string|null; seller_nickname:string|null; first_seen_at:string;
+    listing_status:string; first_seen_sold_at:string|null; sold_display_price:number|null;
+    last_review_at:string|null; next_review_at:string|null; last_result:string|null };
   "爬取时间": string;
   "搜索关键字": string;
   "任务名称": string;

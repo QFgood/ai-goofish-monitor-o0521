@@ -236,7 +236,11 @@ async def delete_task(
                 (remaining_task.keyword or "").strip() == keyword
                 for remaining_task in remaining_tasks
             )
-            if not keyword_still_in_use:
+            from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+            with sqlite_connection() as conn:
+                has_tracking = conn.execute('SELECT 1 FROM result_listing_memberships WHERE filename=? LIMIT 1',
+                                            (build_result_filename(keyword),)).fetchone() is not None
+            if not keyword_still_in_use and not has_tracking:
                 await delete_result_file_records(build_result_filename(keyword))
                 delete_price_snapshots(keyword)
     except Exception as e:
@@ -279,3 +283,15 @@ async def stop_task(
         raise HTTPException(status_code=404, detail="任务未找到")
     await process_service.stop_task(task_id)
     return {"message": f"任务ID {task_id} 已发送停止信号"}
+
+
+@router.get('/{task_id}/revisits')
+async def get_result_revisit_status(task_id: int, service: TaskService = Depends(get_task_service)):
+    if not await service.get_task(task_id):
+        raise HTTPException(404, '任务未找到')
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    with sqlite_connection() as conn:
+        runs=[dict(r) for r in conn.execute('SELECT * FROM result_revisit_runs WHERE task_id=? ORDER BY started_at DESC LIMIT 10',(task_id,))]
+        row=conn.execute('''SELECT count(*) AS registered,min(next_review_at) AS next_review_at
+            FROM result_listing_memberships WHERE task_id=? AND archived=0''',(task_id,)).fetchone()
+    return {'runs':runs, **dict(row)}

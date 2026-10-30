@@ -9,8 +9,8 @@ const label=(bin:typeof props.bins[number])=>`¥${bin.min_price}～＜¥${bin.ma
 </script>
 <template>
   <div>
-    <p v-if="!bins.length" class="py-14 text-center text-sm text-slate-500">暂无有效价格，调整筛选条件或等待商品采集。</p>
-    <svg v-else viewBox="0 0 720 260" class="w-full h-[280px] text-slate-500" role="img" aria-label="商品价格区间分布柱状图">
+    <p v-if="!bins.length" class="py-14 text-center text-sm text-slate-500 dark:text-slate-300">暂无有效价格，调整筛选条件或等待商品采集。</p>
+    <svg v-else viewBox="0 0 720 260" class="w-full h-[280px] text-slate-500 dark:text-slate-300" role="img" aria-label="商品价格区间分布柱状图">
       <text x="10" y="15" font-size="12" fill="currentColor">商品数量</text>
       <line x1="50" y1="210" x2="700" y2="210" stroke="currentColor" opacity=".3"/>
       <g v-for="(bin,index) in bins" :key="bin.min_price" role="button" tabindex="0" :aria-label="`${label(bin)}，${bin.count}件`" class="cursor-pointer" @click="emit('select-range',bin.min_price,bin.max_price-.01)" @keydown.enter="emit('select-range',bin.min_price,bin.max_price-.01)" @keydown.space.prevent="emit('select-range',bin.min_price,bin.max_price-.01)">
@@ -20,6 +20,6 @@ const label=(bin:typeof props.bins[number])=>`¥${bin.min_price}～＜¥${bin.ma
         <text :x="55+index*step+(step-8)/2" y="245" text-anchor="middle" fill="currentColor" font-size="9">～{{bin.max_price}}</text>
       </g>
     </svg>
-    <p class="text-xs text-slate-500">横轴为挂牌价格区间（元），纵轴为商品数量；点击柱子筛选该价位。</p>
+    <p class="text-xs text-slate-500 dark:text-slate-300">横轴为挂牌价格区间（元），纵轴为商品数量；点击柱子筛选该价位。</p>
   </div>
 </template>

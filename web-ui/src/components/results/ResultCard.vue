@@ -172,6 +172,12 @@ const expanded = ref(false)
       </div>
     </CardContent>
 
+    <div v-if="item.listing_tracking" class="px-4 pb-3 text-xs text-slate-500 space-y-1">
+      <p>平台状态：{{item.listing_tracking.listing_status==='sold'?'已售':item.listing_tracking.listing_status==='active'?'挂牌中（待回访确认）':'待确认'}} · 商品ID {{info.商品ID}}</p>
+      <p>登记：{{formatDateTime(item.listing_tracking.first_seen_at)}}<span v-if="item.listing_tracking.first_seen_sold_at"> · 确认已售：{{formatDateTime(item.listing_tracking.first_seen_sold_at)}}</span></p>
+      <p>回访：{{item.listing_tracking.last_result || '等待首次回访'}}<span v-if="item.listing_tracking.next_review_at"> · 下次 {{formatDateTime(item.listing_tracking.next_review_at)}}</span></p>
+      <a v-if="item.listing_tracking.seller_id" :href="`https://www.goofish.com/personal?userId=${item.listing_tracking.seller_id}`" target="_blank" rel="noopener noreferrer" class="text-primary">卖家主页 · {{item.listing_tracking.seller_nickname || seller.卖家昵称 || info.卖家昵称 || item.listing_tracking.seller_id}}</a>
+    </div>
     <CardFooter class="px-4 py-3 bg-slate-50/30 border-t border-slate-100/60 flex items-center justify-between text-[10px]">
       <div class="flex items-center gap-3 text-slate-400">
         <div class="flex items-center gap-1">

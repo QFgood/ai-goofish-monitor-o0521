@@ -33,6 +33,7 @@ export function useResults() {
 
   function loadPersistedFilters(): ResultFilters {
     const defaults: ResultFilters = {
+      listing_state: 'active',
       recommended_only: false,
       ai_recommended_only: false,
       keyword_recommended_only: false,
