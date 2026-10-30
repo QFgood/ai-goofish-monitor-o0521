@@ -8,14 +8,12 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import TaskRegionSelector from '@/components/tasks/TaskRegionSelector.vue'
 import RevisitSchedulePicker from '@/components/tasks/RevisitSchedulePicker.vue'
 
 type FormMode = 'create' | 'edit'
 type EmittedData = TaskGenerateRequest | Partial<Task>
 const AUTO_ACCOUNT_VALUE = '__auto__'
-const EMPTY_CRON_VALUE = '__manual__'
 
 const props = defineProps<{
   mode: FormMode
@@ -34,43 +32,6 @@ const form = ref<any>({})
 const accountStrategy = ref<'auto' | 'fixed' | 'rotate'>('auto')
 const selectedAccountStateFile = ref(AUTO_ACCOUNT_VALUE)
 const keywordRulesInput = ref('')
-const cronMode = ref<'preset' | 'custom'>('preset')
-
-// 常用 cron 预设选项
-const cronPresets = computed(() => [
-  { value: EMPTY_CRON_VALUE, label: t('tasks.form.cron.manual') },
-  { value: '*/5 * * * *', label: t('tasks.form.cron.every5Minutes') },
-  { value: '*/15 * * * *', label: t('tasks.form.cron.every15Minutes') },
-  { value: '*/30 * * * *', label: t('tasks.form.cron.every30Minutes') },
-  { value: '0 * * * *', label: t('tasks.form.cron.hourly') },
-  { value: '0 */2 * * *', label: t('tasks.form.cron.every2Hours') },
-  { value: '0 */6 * * *', label: t('tasks.form.cron.every6Hours') },
-  { value: '0 8 * * *', label: t('tasks.form.cron.daily8') },
-  { value: '0 12 * * *', label: t('tasks.form.cron.daily12') },
-  { value: '0 18 * * *', label: t('tasks.form.cron.daily18') },
-  { value: '0 20 * * *', label: t('tasks.form.cron.daily20') },
-  { value: '0 8,12,18 * * *', label: t('tasks.form.cron.daily81218') },
-  { value: '0 9 * * 1-5', label: t('tasks.form.cron.weekday9') },
-  { value: '0 10 * * 6,0', label: t('tasks.form.cron.weekend10') },
-])
-
-// 判断 cron 值是否为预设值
-function isPresetCronValue(value: string): boolean {
-  if (!value) return true
-  return cronPresets.value.some((preset) => preset.value === value)
-}
-
-// 判断当前 cron 是否为预设值
-const isPresetCron = computed(() => isPresetCronValue(form.value.cron))
-
-// 预设选择的值
-const presetCronValue = computed({
-  get: () => {
-    if (!isPresetCron.value) return EMPTY_CRON_VALUE
-    return form.value.cron || EMPTY_CRON_VALUE
-  },
-  set: (val: string) => { form.value.cron = val === EMPTY_CRON_VALUE ? '' : val },
-})
 const accountStrategyOptions = computed(() => [
   { value: 'auto', label: t('tasks.form.accountStrategy.auto'), description: t('tasks.form.accountStrategy.autoDescription') },
   { value: 'fixed', label: t('tasks.form.accountStrategy.fixed'), description: t('tasks.form.accountStrategy.fixedDescription') },
@@ -116,9 +77,6 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       decision_mode: defaultValues.decision_mode || props.initialData.decision_mode || 'ai',
     }
     keywordRulesInput.value = (defaultValues.keyword_rules || props.initialData.keyword_rules || []).join('\n')
-    // 编辑模式下，根据 cron 值判断模式
-    const cronVal = defaultValues.cron ?? props.initialData.cron ?? ''
-    cronMode.value = isPresetCronValue(cronVal) ? 'preset' : 'custom'
   } else {
     form.value = {
       task_name: '',
@@ -152,9 +110,6 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
     if (defaultValues.keyword_rules && defaultValues.keyword_rules.length > 0) {
       keywordRulesInput.value = defaultValues.keyword_rules.join('\n')
     }
-    // 创建模式下，根据默认值判断模式
-    const cronVal = defaultValues.cron ?? ''
-    cronMode.value = isPresetCronValue(cronVal) ? 'preset' : 'custom'
   }
 
   form.value.revisit_enabled ??= false
@@ -269,7 +224,7 @@ function handleSubmit() {
       <fieldset class="rounded-xl border border-slate-200 p-4 space-y-3">
         <legend class="px-2 font-medium">已登记商品回访</legend>
         <label class="flex items-center gap-2"><input v-model="form.revisit_enabled" type="checkbox" />启用定时回访</label>
-        <p class="text-xs text-slate-500">只检查该任务已登记的商品链接，不重新搜索。新商品从次日开始；已售停止回访。时间为上海时区。</p>
+        <p class="text-xs text-slate-500">只检查该任务已登记的商品链接，不重新搜索。新登记商品首次回访最早从次日开始，按所选日期和时间执行；已售停止回访。时间为上海时区。</p>
         <div v-if="form.revisit_enabled" class="grid gap-3 sm:grid-cols-2">
           <RevisitSchedulePicker v-model="form.revisit_cron" class="sm:col-span-2" />
           <div><Label for="revisit-limit">每次最多检查商品数</Label><Input id="revisit-limit" v-model.number="form.revisit_limit" type="number" min="1" max="100" required /></div>
@@ -348,40 +303,8 @@ function handleSubmit() {
         <Input id="max-pages" v-model.number="form.max_pages" type="number" class="sm:col-span-3" />
       </div>
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-        <Label for="cron" class="sm:text-right">{{ t('tasks.form.schedule') }}</Label>
-        <div class="space-y-2 sm:col-span-3">
-          <Tabs v-model="cronMode" class="w-full">
-            <TabsList class="grid w-full grid-cols-2">
-              <TabsTrigger value="preset">{{ t('tasks.form.cronPresetTab') }}</TabsTrigger>
-              <TabsTrigger value="custom">{{ t('tasks.form.cronCustomTab') }}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="preset">
-              <Select v-model="presetCronValue">
-                <SelectTrigger>
-                  <SelectValue :placeholder="t('tasks.form.cronPlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="preset in cronPresets" :key="preset.value" :value="preset.value">
-                    {{ preset.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </TabsContent>
-            <TabsContent value="custom">
-              <Input
-                id="cron"
-                v-model="form.cron"
-                :placeholder="t('tasks.form.cronCustomPlaceholder')"
-              />
-              <p class="text-xs text-gray-500 mt-1">
-                {{ t('tasks.form.cronCustomHintLine1') }}
-              </p>
-              <p class="text-xs text-gray-500">
-                {{ t('tasks.form.cronCustomHintLine2') }}
-              </p>
-            </TabsContent>
-          </Tabs>
-        </div>
+        <Label class="sm:text-right">采集定时设置</Label>
+        <RevisitSchedulePicker v-model="form.cron" id-prefix="collection" label-prefix="采集" allow-manual class="sm:col-span-3" />
       </div>
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label class="sm:text-right">{{ t('tasks.form.accountStrategyLabel') }}</Label>

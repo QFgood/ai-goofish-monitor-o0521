@@ -20,7 +20,7 @@ def migrate_result_revisits(conn):
             last_review_at TEXT, last_result TEXT, worker_id TEXT, locked_until TEXT)''',
         '''CREATE TABLE IF NOT EXISTS result_listing_memberships (
             task_id INTEGER NOT NULL, item_id TEXT NOT NULL REFERENCES result_listing_items(item_id),
-            filename TEXT NOT NULL, next_review_at TEXT, tracking_until TEXT NOT NULL,
+            filename TEXT NOT NULL, next_review_at TEXT, tracking_until TEXT NOT NULL, review_not_before TEXT,
             archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(task_id,item_id))''',
         '''CREATE TABLE IF NOT EXISTS result_listing_observations (
             id INTEGER PRIMARY KEY, item_id TEXT NOT NULL REFERENCES result_listing_items(item_id),
@@ -39,4 +39,7 @@ def migrate_result_revisits(conn):
         'CREATE INDEX IF NOT EXISTS idx_result_revisit_history ON result_listing_observations(item_id,observed_at)',
     ):
         conn.execute(sql)
+    columns = {r[1] for r in conn.execute('PRAGMA table_info(result_listing_memberships)')}
+    if 'review_not_before' not in columns:
+        conn.execute('ALTER TABLE result_listing_memberships ADD COLUMN review_not_before TEXT')
     conn.execute("INSERT OR IGNORE INTO app_metadata(key,value) VALUES('migration:result_revisits:v1','done')")

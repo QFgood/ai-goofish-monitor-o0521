@@ -41,3 +41,24 @@ test('invalid selections are rejected and valid preview pads hours and minutes',
   }
   assert.equal(describe({frequency:'sun',hour:0,minute:5}),'每周日 00:05（上海时间）')
 })
+
+const timeSource=await readFile(new URL('../src/lib/listingTime.ts',import.meta.url),'utf8')
+const timeModule=ts.transpileModule(timeSource,{compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText
+const {formatListingTime}=await import('data:text/javascript;base64,'+Buffer.from(timeModule).toString('base64'))
+test('revisit cards show full Shanghai date and minute independent of device timezone',()=>{
+  const previous=process.env.TZ
+  try {
+    process.env.TZ='America/Los_Angeles'
+    assert.equal(formatListingTime('2026-10-31T04:00:00Z'),'2026-10-31 12:00')
+    assert.equal(formatListingTime('2026-10-31T12:00:00+08:00'),'2026-10-31 12:00')
+    assert.equal(formatListingTime('2026-10-31T12:00:00'),'2026-10-31 12:00')
+    assert.equal(formatListingTime('2026-10-31T00:05:00+08:00'),'2026-10-31 00:05')
+  } finally {
+    if (previous===undefined) delete process.env.TZ
+    else process.env.TZ=previous
+  }
+})
+test('missing or malformed listing dates show missing data instead of crashing the card',()=>{
+  assert.equal(formatListingTime(null),'—')
+  assert.equal(formatListingTime('invalid'),'—')
+})

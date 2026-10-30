@@ -37,6 +37,11 @@ class TaskService:
         updated_task = task.apply_update(task_update)
         saved = await self.repository.save(updated_task)
         await self._register_existing(saved)
+        if saved.revisit_enabled:
+            import asyncio
+            from src.services.result_revisit_service import ResultRevisitService
+            runner=ResultRevisitService(db_path=getattr(self.repository,'db_path',None))
+            await asyncio.to_thread(runner.reconcile_schedule,saved.model_dump(),force=task.revisit_cron!=saved.revisit_cron)
         return saved
 
     async def delete_task(self, task_id: int) -> bool:
@@ -52,4 +57,4 @@ class TaskService:
         if task.revisit_enabled:
             import asyncio
             from src.services.result_revisit_service import ResultRevisitService
-            await asyncio.to_thread(ResultRevisitService().sync_existing, task.model_dump())
+            await asyncio.to_thread(ResultRevisitService(db_path=getattr(self.repository,'db_path',None)).sync_existing, task.model_dump())
