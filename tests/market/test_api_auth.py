@@ -8,6 +8,7 @@ from src.api import auth
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('WEB_AUTH_ENABLED','true')
     monkeypatch.setenv('APP_DATABASE_FILE', str(tmp_path / 'app.sqlite3'))
     monkeypatch.setenv('WEB_SESSION_SECRET', 'offline-fixture-session-secret-32bytes-minimum')
     monkeypatch.setattr(auth.config.settings, 'web_username', 'fixture-admin')
@@ -106,3 +107,14 @@ def test_populated_csv_streams_across_database_pages(client):
     rows=list(csv.DictReader(io.StringIO(response.text.lstrip('\ufeff'))))
     assert len(rows)==501
     assert len({r['item_id'] for r in rows})==501
+
+
+def test_home_mode_skips_password_but_still_blocks_cross_site_writes(client,monkeypatch):
+    monkeypatch.setenv('WEB_AUTH_ENABLED','false')
+    client.cookies.clear()
+    session=client.get('/auth/session').json()
+    assert session['authentication_required'] is False
+    assert client.get('/api/tasks').status_code==200
+    assert client.post('/api/market/tasks/pause-all',headers={'Origin':'https://untrusted.example'}).status_code==403
+    with client.websocket_connect('/ws') as socket:
+        socket.send_text('home fixture')

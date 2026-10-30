@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from urllib.parse import quote
 
 from src.services.price_history_service import build_price_history_insights
+from src.services.result_price_summary_service import result_price_insights, select_priced_results, apply_filtered_market_context
 from src.services.result_export_service import build_results_csv
 from src.services.result_file_service import (
     enrich_records_with_price_insight,
@@ -88,6 +89,9 @@ async def get_result_file_content(
     ai_recommended_only: bool = Query(False),
     keyword_recommended_only: bool = Query(False),
     include_hidden: bool = Query(False),
+    min_price: float | None = Query(None, ge=0),
+    max_price: float | None = Query(None, ge=0),
+    exclude_low_price: bool = Query(True),
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
 ):
@@ -100,23 +104,21 @@ async def get_result_file_content(
 
     try:
         validate_result_filename(filename)
-        total_items, items = await query_result_records(
-            filename,
-            ai_recommended_only=ai_recommended_only,
-            keyword_recommended_only=keyword_recommended_only,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            page=page,
-            limit=limit,
-            include_hidden=include_hidden,
-        )
+        if min_price is not None and max_price is not None and min_price > max_price:
+            raise ValueError("最低价不能高于最高价")
+        _, decorated = await query_result_records(filename, ai_recommended_only=ai_recommended_only,
+            keyword_recommended_only=keyword_recommended_only, sort_by=sort_by, sort_order=sort_order,
+            page=1, limit=2_147_483_647, include_hidden=include_hidden)
+        filtered, policy = select_priced_results(decorated, min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
+        total_items = len(filtered)
+        items = filtered[(page-1)*limit:page*limit]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取结果文件时出错: {exc}")
     if total_items <= 0 and not await result_file_exists(filename):
         raise HTTPException(status_code=404, detail="结果文件未找到")
-    paginated_results = enrich_records_with_price_insight(items, filename)
+    paginated_results = apply_filtered_market_context(enrich_records_with_price_insight(items, filename), filtered)
 
     return {
         "total_items": total_items,
@@ -127,14 +129,20 @@ async def get_result_file_content(
 
 
 @router.get("/{filename}/insights")
-async def get_result_file_insights(filename: str):
+async def get_result_file_insights(filename: str, ai_recommended_only: bool = False,
+        keyword_recommended_only: bool = False, recommended_only: bool = False, include_hidden: bool = False,
+        min_price: float | None = Query(None, ge=0), max_price: float | None = Query(None, ge=0), exclude_low_price: bool = True):
     try:
         validate_result_filename(filename)
-        keyword = filename.replace("_full_data.jsonl", "")
-        visible_item_ids = load_visible_result_item_ids(filename)
-        return build_price_history_insights(keyword, visible_item_ids=visible_item_ids)
+        if ai_recommended_only and keyword_recommended_only:
+            raise ValueError('AI推荐筛选与关键词推荐筛选不能同时开启')
+        if min_price is not None and max_price is not None and min_price > max_price:
+            raise ValueError('最低价不能高于最高价')
+        return await result_price_insights(filename, ai_recommended_only=ai_recommended_only or (recommended_only and not keyword_recommended_only),
+            keyword_recommended_only=keyword_recommended_only, include_hidden=include_hidden,
+            min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(400, str(exc)) from None
 
 
 @router.get("/{filename}/export")
@@ -144,6 +152,9 @@ async def export_result_file_content(
     ai_recommended_only: bool = Query(False),
     keyword_recommended_only: bool = Query(False),
     include_hidden: bool = Query(False),
+    min_price: float | None = Query(None, ge=0),
+    max_price: float | None = Query(None, ge=0),
+    exclude_low_price: bool = Query(True),
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
 ):
@@ -162,8 +173,11 @@ async def export_result_file_content(
             sort_order=sort_order,
             include_hidden=include_hidden,
         )
+        if min_price is not None and max_price is not None and min_price > max_price:
+            raise ValueError('最低价不能高于最高价')
+        results, _ = select_priced_results(results, min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
         csv_text = build_results_csv(
-            enrich_records_with_price_insight(results, filename)
+            apply_filtered_market_context(enrich_records_with_price_insight(results, filename), results)
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

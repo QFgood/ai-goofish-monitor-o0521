@@ -16,8 +16,7 @@ services:
       - .env
     environment:
       APP_DATABASE_FILE: /app/data/app.sqlite3
-      WEB_USERNAME: ${WEB_USERNAME:?Set an application username in .env}
-      WEB_PASSWORD: ${WEB_PASSWORD:?Set a unique application password of at least 12 characters}
+      WEB_AUTH_ENABLED: ${WEB_AUTH_ENABLED:-false}
       TZ: Asia/Shanghai
       RUN_HEADLESS: "true"
       RUNNING_IN_DOCKER: "true"
@@ -51,10 +50,8 @@ services:
       - "${LAN_BIND_IP:-192.168.9.202}:${LAN_PORT:-8000}:80"
     environment:
       NO_PROXY: app,localhost,127.0.0.1
-      GATEWAY_USERNAME: ${GATEWAY_USERNAME:?Missing gateway username}
-      GATEWAY_PASSWORD_HASH: ${GATEWAY_PASSWORD_HASH:?Missing bcrypt hash}
     volumes:
-      - ./deploy/lan/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/lan/Caddyfile.home:/etc/caddy/Caddyfile:ro
     depends_on:
       - app
     restart: unless-stopped

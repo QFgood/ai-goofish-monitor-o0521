@@ -7,6 +7,8 @@ import type { GetResultContentParams } from '@/api/results'
 import { useWebSocket } from '@/composables/useWebSocket'
 import * as tasksApi from '@/api/tasks'
 
+type ResultFilters = Required<Omit<GetResultContentParams, 'page' | 'limit' | 'min_price' | 'max_price'>> & Pick<GetResultContentParams, 'min_price' | 'max_price'>
+
 export function useResults() {
   const { t } = useI18n()
   const route = useRoute()
@@ -29,12 +31,15 @@ export function useResults() {
   
   const STORAGE_KEY_FILTERS = 'resultFilters'
 
-  function loadPersistedFilters(): Required<Omit<GetResultContentParams, 'page' | 'limit'>> {
-    const defaults: Required<Omit<GetResultContentParams, 'page' | 'limit'>> = {
+  function loadPersistedFilters(): ResultFilters {
+    const defaults: ResultFilters = {
       recommended_only: false,
       ai_recommended_only: false,
       keyword_recommended_only: false,
       include_hidden: false,
+      exclude_low_price: true,
+      min_price: undefined,
+      max_price: undefined,
       sort_by: 'crawl_time',
       sort_order: 'desc',
     }
@@ -45,7 +50,7 @@ export function useResults() {
     return defaults
   }
 
-  const filters = reactive<Required<Omit<GetResultContentParams, 'page' | 'limit'>>>(loadPersistedFilters())
+  const filters = reactive<ResultFilters>(loadPersistedFilters())
 
   const isLoading = ref(false)
   const error = ref<Error | null>(null)
@@ -59,6 +64,11 @@ export function useResults() {
     return filename.replace(/_full_data\.jsonl$/i, '').toLowerCase()
   }
 
+  function requestFilters() {
+    return {...filters, min_price: typeof filters.min_price === 'number' ? filters.min_price : undefined,
+      max_price: typeof filters.max_price === 'number' ? filters.max_price : undefined}
+  }
+  let resultRequest = 0, insightRequest = 0
   // Methods
   async function fetchFiles() {
     try {
@@ -86,9 +96,11 @@ export function useResults() {
   }
 
   async function fetchResults() {
+    const request = ++resultRequest
     if (!selectedFile.value) {
       results.value = []
       totalItems.value = 0
+      isLoading.value = false
       return
     }
 
@@ -96,30 +108,35 @@ export function useResults() {
     error.value = null
     try {
       const data = await resultsApi.getResultContent(selectedFile.value, {
-        ...filters,
+        ...requestFilters(),
         page: page.value,
         limit: limit.value,
       })
+      if (request !== resultRequest) return
       results.value = data.items
       totalItems.value = data.total_items
     } catch (e) {
+      if (request !== resultRequest) return
       if (e instanceof Error) error.value = e
       results.value = []
       totalItems.value = 0
     } finally {
-      isLoading.value = false
+      if (request === resultRequest) isLoading.value = false
     }
   }
 
   async function fetchInsights() {
+    const request = ++insightRequest
     if (!selectedFile.value) {
       insights.value = null
       return
     }
 
     try {
-      insights.value = await resultsApi.getResultInsights(selectedFile.value)
+      const data = await resultsApi.getResultInsights(selectedFile.value, requestFilters())
+      if (request === insightRequest) insights.value = data
     } catch (e) {
+      if (request !== insightRequest) return
       if (e instanceof Error) error.value = e
       insights.value = null
     }
@@ -195,7 +212,7 @@ export function useResults() {
 
   function exportSelectedResults() {
     if (!selectedFile.value) return
-    resultsApi.downloadResultExport(selectedFile.value, { ...filters })
+    resultsApi.downloadResultExport(selectedFile.value, requestFilters())
   }
 
   async function deleteSelectedFile(filename?: string) {
@@ -228,6 +245,7 @@ export function useResults() {
     try {
       await resultsApi.updateItemStatus(selectedFile.value, itemId, newStatus)
       await fetchResults()
+      await fetchInsights()
     } catch (e) {
       if (e instanceof Error) error.value = e
     }
@@ -254,9 +272,9 @@ export function useResults() {
   watch(filters, (val) => {
     localStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(val))
   }, { deep: true })
-  watch([selectedFile, filters], fetchResults, { deep: true })
+  watch([selectedFile, filters], () => { page.value = 1; fetchResults(); fetchInsights() }, { deep: true })
+  watch(page, fetchResults)
   watch(selectedFile, () => {
-    fetchInsights()
     fetchBlacklistRules()
   })
   watch(selectedFile, (value) => {
@@ -299,6 +317,8 @@ export function useResults() {
     results,
     insights,
     totalItems,
+    page,
+    limit,
     filters,
     isLoading,
     error,

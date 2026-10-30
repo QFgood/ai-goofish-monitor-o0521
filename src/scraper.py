@@ -4,6 +4,7 @@ import os
 import random
 import re
 import tempfile
+import uuid
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
@@ -527,7 +528,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     region_filter = (task_config.get("region") or "").strip()
 
     processed_links = set()
-    history_run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    history_run_id = str(uuid.uuid4())
     history_seen_item_ids: set[str] = set()
     historical_snapshots = load_price_snapshots(keyword)
     result_filename = build_result_filename(keyword)
@@ -686,6 +687,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
 
             page = await context.new_page()
 
+            attempt_completed = False
             try:
                 # 步骤 0 - 模拟真实用户：先访问首页（重要的反检测措施）
                 log_time("步骤 0 - 模拟真实用户访问首页...")
@@ -1197,6 +1199,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         )
                         await random_sleep(10, 15)
 
+                attempt_completed = True
             except PlaywrightTimeoutError as e:
                 if _is_login_url(page.url):
                     raise LoginRequiredError(
@@ -1221,6 +1224,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 if analysis_dispatcher is not None:
                     log_time("等待后台分析任务完成...")
                     await analysis_dispatcher.join()
+                if attempt_completed and history_seen_item_ids:
+                    from src.services.result_price_summary_service import send_result_price_summary
+                    try:
+                        await send_result_price_summary(keyword, task_config.get('task_name', keyword), history_run_id, send_ntfy_notification)
+                    except Exception:
+                        log_time('价格摘要生成失败，本次不发送均价通知。')
                 log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
                 await asyncio.sleep(5)
                 if debug_limit:

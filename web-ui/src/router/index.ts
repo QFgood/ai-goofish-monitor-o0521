@@ -40,12 +40,7 @@ const routes = [
         component: () => import('@/views/ResultsView.vue'),
         meta: { titleKey: 'routes.results', requiresAuth: true },
       },
-      {
-        path: 'market',
-        name: 'Market',
-        component: () => import('@/views/MarketView.vue'),
-        meta: { titleKey: 'routes.market', requiresAuth: true },
-      },
+      { path: 'market', redirect: '/results' },
       {
         path: 'logs',
         name: 'Logs',
