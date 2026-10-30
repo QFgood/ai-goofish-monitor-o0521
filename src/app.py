@@ -96,11 +96,15 @@ async def lifespan(app: FastAPI):
     # for existing history, but never resume those jobs after an upgrade.
     if app is not None:
         app.state.market_runner = None
+        from src.services.result_revisit_manager import ResultRevisitManager
+        app.state.result_revisit_manager = ResultRevisitManager()
     print("应用启动完成")
 
     try:
         yield
     finally:
+        if app is not None and getattr(app.state,'result_revisit_manager',None):
+            await app.state.result_revisit_manager.stop()
         # Shut down legacy services even when lifespan exits with an error.
         print("正在关闭应用...")
         scheduler_service.stop()

@@ -27,12 +27,14 @@ import {
   RefreshCcw,
   Search
 } from 'lucide-vue-next'
+import { isRevisitRunning,describeTaskRevisit } from '@/lib/taskRevisit'
 import { formatCountdown, formatNextRunAbsolute } from '@/lib/taskSchedule'
 
 interface Props {
   tasks: Task[]
   isLoading: boolean
   stoppingIds?: Set<number>
+  pendingRevisitIds?: Set<number>
 }
 
 const props = defineProps<Props>()
@@ -40,6 +42,7 @@ const { t } = useI18n()
 const isStopping = (id: number) => props.stoppingIds?.has(id) ?? false
 const isKeywordMode = (task: Task) => task.decision_mode === 'keyword'
 const nowMs = ref(Date.now())
+const isRevisiting=(task:Task)=>props.pendingRevisitIds?.has(task.id) || isRevisitRunning(task.revisit_run,nowMs.value)
 let timer: number | null = null
 
 onMounted(() => {
@@ -87,6 +90,7 @@ const resolveNextRunLabel = (task: Task) => {
 const emit = defineEmits<{
   (e: 'delete-task', taskId: number): void
   (e: 'run-task', taskId: number): void
+  (e: 'revisit-task', taskId: number): void
   (e: 'stop-task', taskId: number): void
   (e: 'edit-task', task: Task): void
   (e: 'refresh-criteria', task: Task): void
@@ -236,7 +240,8 @@ const emit = defineEmits<{
             </div>
           </div>
 
-          <div class="mt-4 flex flex-wrap gap-2">
+          <div class="mt-4 flex flex-wrap items-start gap-2">
+            <div class="flex flex-1 min-w-[120px] flex-col gap-2">
             <Button
               v-if="!task.is_running"
               size="sm"
@@ -261,6 +266,12 @@ const emit = defineEmits<{
               <RefreshCcw v-else class="mr-1 h-3.5 w-3.5 animate-spin" />
               {{ isStopping(task.id) ? t('tasks.table.stopping') : t('tasks.table.stop') }}
             </Button>
+              <Button size="sm" variant="outline" class="h-8 rounded-lg" :disabled="!task.enabled || isRevisiting(task)"
+                :aria-label="`回访 ${task.task_name}`" :title="task.enabled ? '立即检查已登记商品，不等次日，不开启自动回访' : '请先启用任务'"
+                @click="emit('revisit-task',task.id)">
+                <RefreshCcw class="mr-1 h-3.5 w-3.5" :class="{'animate-spin':isRevisiting(task)}" />{{isRevisiting(task)?'回访中':'回访'}}
+              </Button>
+            </div>
             <Button
               size="icon"
               variant="outline"
@@ -280,6 +291,7 @@ const emit = defineEmits<{
               <Trash2 class="h-4 w-4" />
             </Button>
           </div>
+          <p v-if="task.revisit_run" class="mt-2 text-xs text-slate-500 dark:text-slate-300" role="status">{{describeTaskRevisit(task.revisit_run,nowMs)}}</p>
         </article>
       </template>
     </div>
@@ -463,6 +475,7 @@ const emit = defineEmits<{
             <!-- Column 6: Actions -->
             <TableCell class="px-6 align-middle text-right">
               <div class="flex justify-end items-center gap-2">
+                <div class="flex flex-col gap-2">
                   <Button
                     v-if="!task.is_running"
                     size="sm" 
@@ -489,6 +502,12 @@ const emit = defineEmits<{
                   <span class="font-bold text-[11px]">{{ isStopping(task.id) ? t('tasks.table.stopping') : t('tasks.table.stop') }}</span>
                 </Button>
 
+                  <Button size="sm" variant="outline" class="h-8 rounded-lg" :disabled="!task.enabled || isRevisiting(task)"
+                :aria-label="`回访 ${task.task_name}`" :title="task.enabled ? '立即检查已登记商品，不等次日，不开启自动回访' : '请先启用任务'"
+                @click="emit('revisit-task',task.id)">
+                <RefreshCcw class="mr-1 h-3.5 w-3.5" :class="{'animate-spin':isRevisiting(task)}" />{{isRevisiting(task)?'回访中':'回访'}}
+              </Button>
+                </div>
                 <div class="flex items-center gap-0.5 ml-1">
                   <Button 
                     size="icon" 
@@ -512,6 +531,7 @@ const emit = defineEmits<{
                   </Button>
                 </div>
               </div>
+              <p v-if="task.revisit_run" class="mt-2 max-w-[220px] ml-auto text-xs text-slate-500 dark:text-slate-300" role="status">{{describeTaskRevisit(task.revisit_run,nowMs)}}</p>
             </TableCell>
             </TableRow>
           </template>

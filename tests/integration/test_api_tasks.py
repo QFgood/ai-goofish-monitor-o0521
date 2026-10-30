@@ -214,3 +214,55 @@ def test_revisit_settings_creation_update_and_delete_preserves_registered_result
     with sqlite_connection() as conn:
         assert conn.execute('SELECT count(*) FROM result_items').fetchone()[0]==1
         assert conn.execute('SELECT archived FROM result_listing_memberships').fetchone()[0]==1
+
+
+def test_manual_revisit_api_accepts_background_work_and_exposes_persisted_result(api_context,monkeypatch,tmp_path):
+    from fastapi.testclient import TestClient
+    from src.services.result_revisit_service import ResultRevisitService
+    from src.services.result_revisit_manager import ResultRevisitManager
+    from src.services.result_storage_service import save_result_record
+    from src.api.auth import APIAuthenticationMiddleware
+    class Adapter:
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def item_listing(self,item_id):
+            return {'request_ok':True,'page_complete':True,'raw_status':1,'price':'4500'}
+    def record():return {'任务名称':'Mini','商品信息':{'商品ID':'1001','当前售价':'5000','商品标题':'Offline Fixture'},'卖家信息':{}}
+    monkeypatch.chdir(tmp_path);monkeypatch.setenv('APP_DATABASE_FILE',str(api_context['db_path']))
+    monkeypatch.setenv('WEB_AUTH_ENABLED','false')
+    app=api_context['app'];app.add_middleware(APIAuthenticationMiddleware)
+    manager=ResultRevisitManager(ResultRevisitService(lambda _:Adapter(),db_path=str(api_context['db_path'])))
+    app.state.result_revisit_manager=manager
+    with TestClient(app) as client:
+        task=client.post('/api/tasks/',json={'task_name':'Mini','keyword':'mini','decision_mode':'keyword','keyword_rules':['mini'],
+            'revisit_enabled':False}).json()['task']
+        asyncio.run(save_result_record(record(),'mini'))
+        response=client.post(f"/api/tasks/{task['id']}/revisits/run")
+        assert response.status_code==202
+        run_id=response.json()['run_id']
+        for _ in range(100):
+            latest=client.get('/api/tasks').json()[0]
+            if latest['revisit_run']['status']!='running':break
+            time.sleep(.01)
+        assert latest['revisit_run']['run_id']==run_id
+        assert latest['revisit_run']['reviewed']==1 and latest['revisit_run']['sold']==1
+        assert latest['revisit_enabled'] is False
+        assert client.post('/api/tasks/9999/revisits/run').status_code==404
+        client.patch(f"/api/tasks/{task['id']}",json={'enabled':False})
+        assert client.post(f"/api/tasks/{task['id']}/revisits/run").status_code==400
+
+
+def test_manual_revisit_api_conflict_and_server_auth_guard(api_context,monkeypatch,tmp_path):
+    from fastapi.testclient import TestClient
+    from src.api.auth import APIAuthenticationMiddleware
+    from src.services.result_revisit_service import ResultRevisitService
+    monkeypatch.chdir(tmp_path);monkeypatch.setenv('APP_DATABASE_FILE',str(api_context['db_path']))
+    monkeypatch.setenv('WEB_AUTH_ENABLED','false')
+    app=api_context['app'];app.add_middleware(APIAuthenticationMiddleware)
+    with TestClient(app) as client:
+        task=client.post('/api/tasks/',json={'task_name':'Mini','keyword':'mini','decision_mode':'keyword','keyword_rules':['mini']}).json()['task']
+        prepared=ResultRevisitService().prepare_run(task['id'],manual=True)
+        assert client.post(f"/api/tasks/{task['id']}/revisits/run").status_code==409
+        assert client.post(f"/api/tasks/{task['id']}/revisits/run",headers={'Origin':'https://example.invalid'}).status_code==403
+        monkeypatch.setenv('WEB_AUTH_ENABLED','true')
+        assert client.post(f"/api/tasks/{task['id']}/revisits/run").status_code==401

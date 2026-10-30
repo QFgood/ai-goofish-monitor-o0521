@@ -62,3 +62,18 @@ test('missing or malformed listing dates show missing data instead of crashing t
   assert.equal(formatListingTime(null),'—')
   assert.equal(formatListingTime('invalid'),'—')
 })
+
+const revisitSource=await readFile(new URL('../src/lib/taskRevisit.ts',import.meta.url),'utf8')
+const revisitModule=ts.transpileModule(revisitSource,{compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText
+const {isRevisitRunning,describeTaskRevisit}=await import('data:text/javascript;base64,'+Buffer.from(revisitModule).toString('base64'))
+test('revisit progress excludes expired worker leases and reports completed counts',()=>{
+  const run={run_id:'offline',status:'running',reviewed:2,sold:1,lease_until:'2026-10-30T12:00:00+08:00'}
+  assert.equal(isRevisitRunning(run,Date.parse('2026-10-30T11:00:00+08:00')),true)
+  assert.equal(isRevisitRunning(run,Date.parse('2026-10-30T13:00:00+08:00')),false)
+  assert.match(describeTaskRevisit({...run,status:'completed'}),/检查 2 件，新确认已售 1 件/)
+  assert.match(describeTaskRevisit(run,Date.parse('2026-10-30T13:00:00+08:00')),/中断/)
+})
+test('empty and blocked revisits give an actionable status without fabricated sample counts',()=>{
+  assert.match(describeTaskRevisit({status:'empty'}),/先采集/)
+  assert.match(describeTaskRevisit({status:'access_paused'}),/登录态/)
+})

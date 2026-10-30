@@ -32,6 +32,8 @@ const {
   startTask,
   stopTask,
   stoppingTaskIds,
+  startRevisit,
+  pendingRevisitIds,
 } = useTasks()
 const route = useRoute()
 
@@ -145,6 +147,15 @@ async function handleRefreshCriteria() {
     })
   } finally {
     isCriteriaSubmitting.value = false
+  }
+}
+
+async function handleRevisitTask(taskId:number) {
+  try {
+    await startRevisit(taskId)
+    toast({title:'回访已提交',description:'只检查已登记商品，可在任务下方查看执行结果。'})
+  } catch (error) {
+    toast({title:'无法启动回访',description:(error as Error).message,variant:'destructive'})
   }
 }
 
@@ -270,9 +281,11 @@ onMounted(fetchAccountOptions)
       :tasks="tasks"
       :is-loading="isLoading"
       :stopping-ids="stoppingTaskIds"
+      :pending-revisit-ids="pendingRevisitIds"
       @delete-task="handleDeleteTask"
       @edit-task="handleEditTask"
       @run-task="handleStartTask"
+      @revisit-task="handleRevisitTask"
       @stop-task="handleStopTask"
       @refresh-criteria="handleOpenCriteriaDialog"
       @toggle-enabled="handleToggleEnabled"

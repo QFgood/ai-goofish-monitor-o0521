@@ -106,13 +106,22 @@ else:
     asyncio.run(save_result_record({'任务ID':ordinary['task']['id'],'任务名称':'Docker bounded offline',
         '商品信息':{'商品ID':'889001','商品标题':'Offline Fixture','当前售价':'5000',
             '商品链接':'https://www.goofish.com/item?id=889001'},'卖家信息':{'卖家ID':'889999','卖家昵称':'Offline seller'}},'bounded-fixture'))
+    manual=request('/api/tasks/',{'task_name':'Docker empty manual fixture','keyword':'empty-manual',
+        'decision_mode':'keyword','keyword_rules':['fixture'],'enabled':True,'revisit_enabled':False})
+    accepted=request('/api/tasks/'+str(manual['task']['id'])+'/revisits/run',{})
+    for _ in range(50):
+        current=next(t for t in request('/api/tasks') if t['id']==manual['task']['id'])
+        if current['revisit_run'] and current['revisit_run']['status']!='running':break
+        time.sleep(.05)
+    assert current['revisit_run']['status']=='empty' and current['revisit_run']['reviewed']==0
+    assert current['revisit_enabled'] is False
     jar.save(ignore_discard=True)
 """
         docker('exec','-i',name,'python','-',input=client_script)
         assert (fixture/'data/.session_secret').stat().st_mode & 0o777==0o600
         assert docker('exec',name,'id','-u').strip()=='1000'
         for module in ['src/app.py','src/api/auth.py','src/api/routes/results.py','src/services/result_price_summary_service.py','src/services/result_revisit_service.py',
-                       'src/infrastructure/persistence/result_revisit_schema.py']:
+                       'src/infrastructure/persistence/result_revisit_schema.py','src/services/result_revisit_manager.py','src/api/routes/tasks.py']:
             expected=hashlib.sha256((ROOT/module).read_bytes()).hexdigest()
             code=f"import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/{module}').read_bytes()).hexdigest())"
             assert docker('exec',name,'python','-c',code).strip()==expected

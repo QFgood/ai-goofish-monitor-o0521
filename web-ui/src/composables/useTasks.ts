@@ -1,10 +1,11 @@
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import type {
   Task,
   TaskCreateResponse,
   TaskGenerateRequest,
   TaskUpdate,
 } from '@/types/task.d.ts'
+import { isRevisitRunning } from '@/lib/taskRevisit'
 import * as taskApi from '@/api/tasks'
 import { useWebSocket } from '@/composables/useWebSocket'
 
@@ -12,6 +13,8 @@ export function useTasks() {
   const tasks = ref<Task[]>([])
   const isLoading = ref(false)
   const error = ref<Error | null>(null)
+  const pendingRevisitIds=ref<Set<number>>(new Set())
+  let revisitPoll:ReturnType<typeof setInterval>|null=null
   const stoppingTaskIds = ref<Set<number>>(new Set())
   const { on } = useWebSocket()
 
@@ -136,6 +139,31 @@ export function useTasks() {
     }
   }
   
+  async function startRevisit(taskId:number) {
+    if (pendingRevisitIds.value.has(taskId) || isRevisitRunning(tasks.value.find(task=>task.id===taskId)?.revisit_run)) return
+    pendingRevisitIds.value=new Set([...pendingRevisitIds.value,taskId])
+    try {
+      const accepted=await taskApi.startTaskRevisit(taskId)
+      const task=tasks.value.find(task=>task.id===taskId)
+      if (task) task.revisit_run={...accepted,reviewed:0,sold:0,lease_until:new Date(Date.now()+120000).toISOString()}
+      await fetchTasks({silent:true})
+    } catch (error) {
+      await fetchTasks({silent:true})  // A 409 also restores another worker's progress.
+      throw error
+    } finally {
+      const next=new Set(pendingRevisitIds.value);next.delete(taskId);pendingRevisitIds.value=next
+    }
+  }
+  let polling=false
+  onMounted(()=>{
+    revisitPoll=setInterval(async()=>{
+      if (polling || !tasks.value.some(task=>isRevisitRunning(task.revisit_run))) return
+      polling=true
+      try { await fetchTasks({silent:true}) } finally { polling=false }
+    },2000)
+  })
+  onBeforeUnmount(()=>{if (revisitPoll) clearInterval(revisitPoll)})
+
   // Load tasks when the composable is first used in a component
   onMounted(fetchTasks)
 
@@ -150,5 +178,7 @@ export function useTasks() {
     startTask,
     stopTask,
     stoppingTaskIds,
+    startRevisit,
+    pendingRevisitIds,
   }
 }

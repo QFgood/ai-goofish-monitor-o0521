@@ -70,8 +70,9 @@ def tracked_records(records, listing_state='active', include_hidden=False):
     """Attach lifecycle facts and select by platform status, never result_items.status."""
     with sqlite_connection() as conn:
         rows = {r['item_id']:dict(r) for r in conn.execute('SELECT * FROM result_listing_items')}
-        due = {r['item_id']:r['due'] for r in conn.execute('''SELECT item_id,min(next_review_at) AS due
-            FROM result_listing_memberships WHERE archived=0 GROUP BY item_id''')}
+        due = {r['item_id']:r['due'] for r in conn.execute('''SELECT m.item_id,min(m.next_review_at) AS due
+            FROM result_listing_memberships m JOIN tasks t ON t.id=m.task_id
+            WHERE m.archived=0 AND t.enabled=1 AND t.revisit_enabled=1 GROUP BY m.item_id''')}
     selected=[]
     for original in records:
         if listing_state=='sold' and not include_hidden and original.get('_hidden_reason') in {'manual','rule'}:
@@ -139,7 +140,7 @@ class ResultRevisitService:
                              (due,task['id'],row['item_id']))
             conn.commit()
 
-    def observe(self, item_id, run_id, observation, task, at=None):
+    def observe(self, item_id, run_id, observation, task, at=None, manual=False):
         at=stamp(at)
         ok=observation.get('request_ok') is True and observation.get('page_complete') is True
         status=platform_status(observation.get('raw_status')) if ok else 'unknown'
@@ -172,20 +173,26 @@ class ResultRevisitService:
                 (new,at,evidence,status,price,status,price,status,at,seller,
                  observation.get('seller_nickname') if ok else None,item_id))
             # A shared item is revisited once, updating every subscribing task's due date.
-            for membership in conn.execute('''SELECT m.task_id,t.revisit_cron FROM result_listing_memberships m
+            for membership in conn.execute('''SELECT m.task_id,m.next_review_at,m.review_not_before,t.revisit_cron FROM result_listing_memberships m
                 JOIN tasks t ON t.id=m.task_id WHERE m.item_id=? AND m.archived=0''',(item_id,)).fetchall():
                 due=None if new=='sold' else next_review(dict(membership),at)
+                if due and membership['review_not_before'] and due<membership['review_not_before']:
+                    floor=datetime.fromisoformat(membership['review_not_before'])
+                    following=build_cron_trigger(membership['revisit_cron'],timezone='Asia/Shanghai').get_next_fire_time(None,floor)
+                    due=stamp(following) if following else None
+                if due and manual and membership['next_review_at'] and membership['next_review_at']>at:
+                    due=membership['next_review_at']  # Early testing does not postpone the automatic plan.
                 conn.execute('UPDATE result_listing_memberships SET next_review_at=? WHERE task_id=? AND item_id=?',
                              (due,membership['task_id'],item_id))
             conn.commit()
             return status=='sold' and old['first_seen_sold_at'] is None
 
-    async def run(self, task_id):
+    def prepare_run(self, task_id, manual=False):
         bootstrap_sqlite_storage(self.db_path)
         run_id=str(uuid4()); at=stamp()
         with sqlite_connection(self.db_path) as conn:
             conn.execute('BEGIN IMMEDIATE')
-            row=conn.execute('SELECT * FROM tasks WHERE id=? AND enabled=1 AND revisit_enabled=1',(task_id,)).fetchone()
+            row=conn.execute('SELECT * FROM tasks WHERE id=? AND enabled=1 AND (? OR revisit_enabled=1)',(task_id,int(manual))).fetchone()
             if not row:
                 return {'status':'disabled','reviewed':0,'sold':0}
             if conn.execute("SELECT 1 FROM result_revisit_runs WHERE task_id=? AND status='running' AND lease_until>?",(task_id,at)).fetchone():
@@ -195,14 +202,28 @@ class ResultRevisitService:
             conn.execute('INSERT INTO result_revisit_runs(run_id,task_id,started_at,lease_until,status) VALUES(?,?,?,?,?)',
                          (run_id,task_id,at,stamp(datetime.fromisoformat(at)+timedelta(minutes=2)),'running'))
             conn.commit()
+        return {'task':task,'run_id':run_id,'manual':manual}
+
+    async def run(self, task_id, manual=False):
+        prepared=self.prepare_run(task_id,manual)
+        if 'task' not in prepared:
+            return prepared
+        return await self.execute_run(prepared)
+
+    async def execute_run(self, prepared):
+        task=prepared['task'];task_id=task['id'];run_id=prepared['run_id'];manual=prepared['manual']
+        at=stamp()
         counts={'run_id':run_id,'status':'completed','reviewed':0,'sold':0}
         try:
-            self.sync_existing(task)
+            self.sync_existing({**task,'revisit_enabled':True} if manual else task)
             with sqlite_connection(self.db_path) as conn:
                 targets=conn.execute('''SELECT m.item_id FROM result_listing_memberships m JOIN result_listing_items i USING(item_id)
-                    WHERE m.task_id=? AND m.archived=0 AND m.next_review_at<=? AND m.tracking_until>=?
+                    WHERE m.task_id=? AND m.archived=0 AND (? OR m.next_review_at<=?) AND m.tracking_until>=?
                     AND i.listing_status!='sold' AND (i.locked_until IS NULL OR i.locked_until<?)
-                    ORDER BY m.next_review_at,m.item_id LIMIT ?''',(task_id,at,at,at,task['revisit_limit'])).fetchall()
+                    ORDER BY CASE WHEN ? THEN i.last_review_at ELSE m.next_review_at END,m.next_review_at,m.item_id LIMIT ?''',
+                    (task_id,int(manual),at,at,at,int(manual),task['revisit_limit'])).fetchall()
+            if not targets and manual:
+                counts['status']='empty'
             if targets:
                 if self.adapter_factory is None:
                     from src.services.market_platform import PlaywrightMarketAdapter
@@ -214,8 +235,9 @@ class ResultRevisitService:
                         current=stamp(); lease=stamp(datetime.fromisoformat(current)+timedelta(minutes=2))
                         with sqlite_connection(self.db_path) as conn:
                             conn.execute('BEGIN IMMEDIATE')
-                            enabled=conn.execute('SELECT enabled AND revisit_enabled FROM tasks WHERE id=?',(task_id,)).fetchone()
+                            enabled=conn.execute('SELECT enabled AND (? OR revisit_enabled) FROM tasks WHERE id=?',(int(manual),task_id)).fetchone()
                             if not enabled or not enabled[0]:
+                                counts['status']='interrupted'
                                 break
                             owner=conn.execute("UPDATE result_revisit_runs SET lease_until=? WHERE run_id=? AND status='running'",(lease,run_id)).rowcount
                             if not owner:
@@ -231,7 +253,7 @@ class ResultRevisitService:
                             raise
                         except Exception:
                             observation={'request_ok':False,'page_complete':False,'evidence':'detail_request_failed'}
-                        newly_sold=self.observe(target['item_id'],run_id,observation,task)
+                        newly_sold=self.observe(target['item_id'],run_id,observation,task,manual=manual)
                         counts['reviewed']+=1; counts['sold']+=int(newly_sold)
                         with sqlite_connection(self.db_path) as conn:
                             conn.execute('UPDATE result_revisit_runs SET reviewed=?,sold=? WHERE run_id=?',
