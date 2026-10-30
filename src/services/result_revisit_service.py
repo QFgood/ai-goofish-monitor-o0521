@@ -48,10 +48,11 @@ def register_result(conn, task, record, at=None):
         last_seen_at=max(result_listing_items.last_seen_at,excluded.last_seen_at)''',
         (item_id,seller_id,seller.get('卖家昵称') or product.get('卖家昵称'),
          f'https://www.goofish.com/item?id={item_id}',first,first,cents(product.get('当前售价'))))
-    conn.execute('''INSERT INTO result_listing_memberships(task_id,item_id,filename,next_review_at,tracking_until)
-        VALUES(?,?,?,?,?) ON CONFLICT(task_id,item_id) DO UPDATE SET archived=0''',
+    conn.execute('''INSERT INTO result_listing_memberships(task_id,item_id,filename,next_review_at,tracking_until,review_not_before)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(task_id,item_id) DO UPDATE SET archived=0''',
         (task['id'], item_id, build_result_filename(task['keyword']), next_review(task,at,tomorrow=True),
-         stamp(datetime.fromisoformat(at)+timedelta(days=task['revisit_days']))))
+         stamp(datetime.fromisoformat(at)+timedelta(days=task['revisit_days'])),
+         stamp((datetime.fromisoformat(at)+timedelta(days=1)).replace(hour=0,minute=0,second=0))))
 
 
 def register_saved_result(conn, record, keyword):
@@ -94,16 +95,48 @@ def tracked_records(records, listing_state='active', include_hidden=False):
 
 
 class ResultRevisitService:
-    def __init__(self, adapter_factory=None):
+    def __init__(self, adapter_factory=None, db_path=None):
+        self.db_path=db_path
         self.adapter_factory=adapter_factory
 
     def sync_existing(self, task):
         """Enabling revisits also registers existing saved results, without page visits."""
-        with sqlite_connection() as conn:
+        with sqlite_connection(self.db_path) as conn:
             rows=conn.execute('SELECT raw_json FROM result_items WHERE result_filename=?',
                               (build_result_filename(task['keyword']),)).fetchall()
             for row in rows:
                 register_result(conn,task,json.loads(row['raw_json']))
+            conn.commit()
+
+    def reconcile_schedule(self, task, at=None, force=False):
+        """Align waiting jobs with the saved rule; never execute network work here.
+
+        Legacy rows retain their original earliest day because their registration
+        time was not stored separately. New registrations carry a durable floor.
+        """
+        at=stamp(at)
+        after=datetime.fromisoformat(at)+timedelta(seconds=1)
+        trigger=build_cron_trigger(task['revisit_cron'],timezone='Asia/Shanghai')
+        with sqlite_connection(self.db_path) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            rows=conn.execute('''SELECT m.* FROM result_listing_memberships m
+                JOIN result_listing_items i USING(item_id) WHERE m.task_id=? AND m.archived=0
+                AND m.next_review_at IS NOT NULL AND m.tracking_until>=? AND i.listing_status!='sold'
+                AND (i.locked_until IS NULL OR i.locked_until<?)''',(task['id'],at,at)).fetchall()
+            for row in rows:
+                old=datetime.fromisoformat(row['next_review_at'])
+                floor=row['review_not_before'] or stamp(old.replace(hour=0,minute=0,second=0))
+                if row['review_not_before'] is None:
+                    conn.execute('UPDATE result_listing_memberships SET review_not_before=? WHERE task_id=? AND item_id=?',
+                                 (floor,task['id'],row['item_id']))
+                if not force and trigger.get_next_fire_time(None,old)==old:
+                    continue  # Do not postpone correctly scheduled overdue work.
+                following=trigger.get_next_fire_time(None,max(after,datetime.fromisoformat(floor)))
+                due=stamp(following) if following is not None else None
+                if due and due>row['tracking_until']:
+                    due=None
+                conn.execute('UPDATE result_listing_memberships SET next_review_at=? WHERE task_id=? AND item_id=?',
+                             (due,task['id'],row['item_id']))
             conn.commit()
 
     def observe(self, item_id, run_id, observation, task, at=None):
@@ -112,7 +145,7 @@ class ResultRevisitService:
         status=platform_status(observation.get('raw_status')) if ok else 'unknown'
         price=cents(observation.get('price')) if ok else None
         evidence=observation.get('evidence','unknown')
-        with sqlite_connection() as conn:
+        with sqlite_connection(self.db_path) as conn:
             conn.execute('BEGIN IMMEDIATE')
             old=conn.execute('SELECT * FROM result_listing_items WHERE item_id=?',(item_id,)).fetchone()
             if not old or old['worker_id']!=run_id:
@@ -148,9 +181,9 @@ class ResultRevisitService:
             return status=='sold' and old['first_seen_sold_at'] is None
 
     async def run(self, task_id):
-        bootstrap_sqlite_storage()
+        bootstrap_sqlite_storage(self.db_path)
         run_id=str(uuid4()); at=stamp()
-        with sqlite_connection() as conn:
+        with sqlite_connection(self.db_path) as conn:
             conn.execute('BEGIN IMMEDIATE')
             row=conn.execute('SELECT * FROM tasks WHERE id=? AND enabled=1 AND revisit_enabled=1',(task_id,)).fetchone()
             if not row:
@@ -165,7 +198,7 @@ class ResultRevisitService:
         counts={'run_id':run_id,'status':'completed','reviewed':0,'sold':0}
         try:
             self.sync_existing(task)
-            with sqlite_connection() as conn:
+            with sqlite_connection(self.db_path) as conn:
                 targets=conn.execute('''SELECT m.item_id FROM result_listing_memberships m JOIN result_listing_items i USING(item_id)
                     WHERE m.task_id=? AND m.archived=0 AND m.next_review_at<=? AND m.tracking_until>=?
                     AND i.listing_status!='sold' AND (i.locked_until IS NULL OR i.locked_until<?)
@@ -179,7 +212,7 @@ class ResultRevisitService:
                 async with factory(task) as adapter:
                     for target in targets:
                         current=stamp(); lease=stamp(datetime.fromisoformat(current)+timedelta(minutes=2))
-                        with sqlite_connection() as conn:
+                        with sqlite_connection(self.db_path) as conn:
                             conn.execute('BEGIN IMMEDIATE')
                             enabled=conn.execute('SELECT enabled AND revisit_enabled FROM tasks WHERE id=?',(task_id,)).fetchone()
                             if not enabled or not enabled[0]:
@@ -200,12 +233,12 @@ class ResultRevisitService:
                             observation={'request_ok':False,'page_complete':False,'evidence':'detail_request_failed'}
                         newly_sold=self.observe(target['item_id'],run_id,observation,task)
                         counts['reviewed']+=1; counts['sold']+=int(newly_sold)
-                        with sqlite_connection() as conn:
+                        with sqlite_connection(self.db_path) as conn:
                             conn.execute('UPDATE result_revisit_runs SET reviewed=?,sold=? WHERE run_id=?',
                                          (counts['reviewed'],counts['sold'],run_id));conn.commit()
         except (LoginExpired,AccessRestricted):
             counts['status']='access_paused'
-            with sqlite_connection() as conn:
+            with sqlite_connection(self.db_path) as conn:
                 conn.execute('UPDATE tasks SET revisit_enabled=0 WHERE id=?',(task_id,))
                 conn.execute("UPDATE result_listing_items SET last_result='access_paused' WHERE worker_id=?",(run_id,))
                 conn.commit()
@@ -215,7 +248,7 @@ class ResultRevisitService:
         except Exception:
             counts['status']='failed'
         finally:
-            with sqlite_connection() as conn:
+            with sqlite_connection(self.db_path) as conn:
                 conn.execute('UPDATE result_listing_items SET worker_id=NULL,locked_until=NULL WHERE worker_id=?',(run_id,))
                 conn.execute('UPDATE result_revisit_runs SET status=?,finished_at=?,reviewed=?,sold=? WHERE run_id=?',
                              (counts['status'],stamp(),counts['reviewed'],counts['sold'],run_id));conn.commit()

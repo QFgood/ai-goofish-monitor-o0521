@@ -80,6 +80,14 @@ async def lifespan(app: FastAPI):
         if task.is_running:
             await task_service.update_task_status(task.id, False)
 
+    # Repair queues created before rule edits were propagated. This is DB-only.
+    import asyncio
+    from src.services.result_revisit_service import ResultRevisitService
+    revisits=ResultRevisitService()
+    for task in tasks_list:
+        if task.revisit_enabled:
+            await asyncio.to_thread(revisits.reconcile_schedule,task.model_dump())
+
     # 加载定时任务
     await scheduler_service.reload_jobs(tasks_list)
     scheduler_service.start()

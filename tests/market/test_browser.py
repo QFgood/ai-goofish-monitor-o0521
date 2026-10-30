@@ -68,6 +68,8 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             time.sleep(.1)
         else:
             pytest.fail('local fixture server did not start')
+        with sqlite_connection() as conn:
+            conn.execute("UPDATE result_listing_memberships SET next_review_at='2026-10-31T12:00:00+08:00' WHERE item_id='990001'");conn.commit()
         with sync_playwright() as playwright:
             browser=playwright.chromium.launch(executable_path='/usr/bin/chromium',headless=True)
             context=browser.new_context(viewport={'width':1440,'height':1000},locale='zh-CN')
@@ -81,6 +83,9 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             expect(page.get_by_role('img',name='商品价格区间分布柱状图')).to_be_visible()
             expect(page.get_by_text('¥5,200',exact=True).first).to_be_visible()
             assert page.get_by_text('离线 Fixture · 25元商品',exact=True).count()==0
+            expect(page.get_by_text('下次回访：2026-10-31 12:00（上海时间）',exact=False).first).to_be_visible()
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.locator('.group.flex.flex-col').filter(has_text='下次回访：2026-10-31 12:00').first.screenshot(path=str(ROOT/'docs/screenshots/revisit-next-time-card.png'))
             checkbox=page.get_by_label('排除疑似低价引流（至少5件样本，低于中位数20%）')
             checkbox.uncheck()
             expect(page.get_by_text('离线 Fixture · 25元商品',exact=True)).to_be_visible()
@@ -115,47 +120,60 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
             expect(page.get_by_label('启用定时回访',exact=True)).to_be_checked()
             expect(page.get_by_label('回访频率',exact=True)).to_have_value('daily')
-            expect(page.get_by_label('小时',exact=True)).to_have_value('9')
-            expect(page.get_by_label('分钟',exact=True)).to_have_value('30')
+            expect(page.get_by_label('回访小时',exact=True)).to_have_value('9')
+            expect(page.get_by_label('回访分钟',exact=True)).to_have_value('30')
             assert page.get_by_label('回访定时规则（Cron）',exact=True).count()==0
             page.get_by_label('回访频率',exact=True).select_option('weekend')
-            page.get_by_label('小时',exact=True).select_option('12')
-            page.get_by_label('分钟',exact=True).select_option('5')
+            page.get_by_label('回访小时',exact=True).select_option('12')
+            page.get_by_label('回访分钟',exact=True).select_option('5')
             expect(page.get_by_text('周末（周六、周日） 12:05（上海时间）',exact=True)).to_be_visible()
             expect(page.get_by_label('每次最多检查商品数',exact=True)).to_have_value('20')
+            expect(page.get_by_label('采集频率',exact=True)).to_have_value('manual')
+            page.get_by_label('采集频率',exact=True).select_option('daily')
+            page.get_by_label('采集小时',exact=True).select_option('8')
+            page.get_by_label('采集分钟',exact=True).select_option('15')
+            assert page.locator('#cron').count()==0
+
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
-                page.screenshot(path=str(screenshot_dir/'simple-revisit-schedule.png'),full_page=True)
+                page.screenshot(path=str(screenshot_dir/'unified-schedule-settings.png'),full_page=True)
             page.set_viewport_size({'width':390,'height':844})
             page.get_by_label('回访频率',exact=True).scroll_into_view_if_needed()
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)
-                page.screenshot(path=str(screenshot_dir/'simple-revisit-schedule-mobile.png'),full_page=True)
+                page.screenshot(path=str(screenshot_dir/'unified-schedule-settings-mobile.png'),full_page=True)
+            page.get_by_label('采集频率',exact=True).scroll_into_view_if_needed()
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.wait_for_timeout(500)
+                page.screenshot(path=str(screenshot_dir/'collection-schedule-mobile.png'),full_page=True)
             page.set_viewport_size({'width':1440,'height':1000})
             # Submit through the real form and API, then reopen to check persisted selections.
             page.locator('button[type="submit"][form="task-form"]').click()
             expect(page.get_by_role('dialog')).to_have_count(0)
             page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
             expect(page.get_by_label('回访频率',exact=True)).to_have_value('weekend')
-            expect(page.get_by_label('小时',exact=True)).to_have_value('12')
-            expect(page.get_by_label('分钟',exact=True)).to_have_value('5')
+            expect(page.get_by_label('回访小时',exact=True)).to_have_value('12')
+            expect(page.get_by_label('回访分钟',exact=True)).to_have_value('5')
             with sqlite_connection() as conn:
                 assert conn.execute('SELECT revisit_cron FROM tasks WHERE id=?',(task.id,)).fetchone()[0]=='5 12 * * sat,sun'
+                assert conn.execute('SELECT cron FROM tasks WHERE id=?',(task.id,)).fetchone()[0]=='15 8 * * *'
             # Complex legacy rules survive saving unrelated fields.
             page.keyboard.press('Escape')
-            response=page.request.patch(f'http://127.0.0.1:{port}/api/tasks/{task.id}',data={'revisit_cron':'*/20 * * * *'})
+            response=page.request.patch(f'http://127.0.0.1:{port}/api/tasks/{task.id}',data={'revisit_cron':'*/20 * * * *','cron':'0 8,12,18 * * *'})
             assert response.status==200
             page.reload()
             page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
             expect(page.get_by_label('回访频率',exact=True)).to_have_value('custom')
-            expect(page.get_by_label('小时',exact=True)).to_be_disabled()
+            expect(page.get_by_label('采集频率',exact=True)).to_have_value('custom')
+            expect(page.get_by_label('回访小时',exact=True)).to_be_disabled()
             page.get_by_label('每次最多检查商品数',exact=True).fill('21')
             page.locator('button[type="submit"][form="task-form"]').click()
             expect(page.get_by_role('dialog')).to_have_count(0)
             with sqlite_connection() as conn:
                 saved=conn.execute('SELECT revisit_cron,revisit_limit FROM tasks WHERE id=?',(task.id,)).fetchone()
                 assert tuple(saved)==('*/20 * * * *',21)
+                assert conn.execute('SELECT cron FROM tasks WHERE id=?',(task.id,)).fetchone()[0]=='0 8,12,18 * * *'
             assert errors==[]
             browser.close()
     finally:
