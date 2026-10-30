@@ -26,10 +26,12 @@ class BarkClient(NotificationClient):
         bark_payload = {
             "title": message.notification_title,
             "body": message.content,
-            "url": message.mobile_link or message.desktop_link,
             "level": "timeSensitive",
             "group": "闲鱼监控"
         }
+
+        if message.mobile_link or message.desktop_link:
+            bark_payload["url"] = message.mobile_link or message.desktop_link
 
         if message.image_url:
             bark_payload["icon"] = message.image_url

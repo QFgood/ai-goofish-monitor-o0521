@@ -66,3 +66,37 @@ def test_price_summary_notification_once_per_run_and_no_recommendations(tmp_path
         assert '推荐' not in reason
         assert not await send_result_price_summary('empty','Empty','run1',notifier)
     asyncio.run(run())
+
+
+def test_summary_has_only_four_real_metrics_and_uses_sold_display_prices(tmp_path,monkeypatch):
+    from src.domain.models.task import TaskCreate
+    from src.services.task_service import TaskService
+    from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    from src.services.result_revisit_service import ResultRevisitService
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('APP_DATABASE_FILE',str(tmp_path/'summary.sqlite3'))
+    async def run():
+        task=await TaskService(SqliteTaskRepository()).create_task(TaskCreate(task_name='Mini',keyword='mini',
+            decision_mode='keyword',keyword_rules=['mini'],enabled=False,revisit_enabled=True))
+        for item,price in [('1',5200),('2',6500),('3',7000),('4',8000)]:
+            await save_result_record(record(item,price),'mini')
+        with sqlite_connection() as conn:
+            conn.execute("UPDATE result_listing_items SET worker_id='fixture' WHERE item_id!='1'");conn.commit()
+        for item,price in [('2',4000),('3',5000),('4',None)]:
+            ResultRevisitService().observe(item,'fixture',{'raw_status':1,'price':price,'request_ok':True,'page_complete':True},task.model_dump())
+        record_market_snapshots(keyword='mini',task_name='Mini',items=[record('1',5300)['商品信息']],
+            run_id='history',snapshot_time='2026-10-29T08:00:00')
+        sender=AsyncMock()
+        assert await send_result_price_summary('mini','Mini','four-metrics',sender)
+        data,text=sender.call_args.args
+        assert data=={'notification_type':'price_summary','商品标题':'价格摘要 · Mini'}
+        assert text.splitlines()==['当前均价：¥5200.00','历史均价：¥5300.00','已售出均价：¥4500.00','售出最低价：¥4000.00']
+        assert not await send_result_price_summary('mini','Mini','four-metrics',sender)
+        sender.assert_awaited_once()
+        with sqlite_connection() as conn:
+            conn.execute("UPDATE result_items SET status='hidden' WHERE item_id='1'");conn.commit()
+        assert await send_result_price_summary('mini','Mini','sold-only',sender)
+        assert sender.call_args.args[1].splitlines()[0]=='当前均价：暂无有效样本'
+        assert '已售出均价：¥4500.00' in sender.call_args.args[1]
+    asyncio.run(run())
