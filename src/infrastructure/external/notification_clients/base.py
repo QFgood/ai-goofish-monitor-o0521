@@ -19,6 +19,7 @@ class NotificationMessage:
     notification_title: str
     content: str
     image_url: str | None
+    is_price_summary: bool = False
 
 
 class NotificationClient(ABC):
@@ -51,6 +52,11 @@ class NotificationClient(ABC):
 
     def _build_message(self, product_data: Dict, reason: str) -> NotificationMessage:
         """格式化消息内容"""
+        if product_data.get('notification_type') == 'price_summary':
+            title = str(product_data.get('商品标题') or '价格摘要')
+            return NotificationMessage(title=title, price='', reason=reason,
+                desktop_link='', mobile_link=None, notification_title=title,
+                content=reason, image_url=None, is_price_summary=True)
         title = product_data.get('商品标题', 'N/A')
         price = product_data.get('当前售价', 'N/A')
         desktop_link = product_data.get('商品链接', '#')

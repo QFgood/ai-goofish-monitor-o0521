@@ -133,3 +133,37 @@ def test_pushplus_client_rejects_business_error_with_http_200(monkeypatch):
 
     with pytest.raises(RuntimeError, match="无效的用户token"):
         asyncio.run(client.send(_product(), "价格合适"))
+
+
+@pytest.mark.parametrize('channel',['wecom','telegram','bark','ntfy','gotify','pushplus','webhook'])
+def test_price_summary_channels_have_four_metrics_without_recommendations_or_links(monkeypatch,channel):
+    from src.infrastructure.external.notification_clients.wecom_bot_client import WeComBotClient
+    from src.infrastructure.external.notification_clients.telegram_client import TelegramClient
+    from src.infrastructure.external.notification_clients.bark_client import BarkClient
+    from src.infrastructure.external.notification_clients.ntfy_client import NtfyClient
+    from src.infrastructure.external.notification_clients.gotify_client import GotifyClient
+    captured={}
+    class Response:
+        def raise_for_status(self):pass
+        def json(self):return {'ok':True,'errcode':0,'code':200}
+    def post(*args,**kwargs):
+        captured.update(kwargs);return Response()
+    monkeypatch.setattr('requests.post',post)
+    clients={
+        'wecom':lambda:WeComBotClient('https://example.com/fixture'),
+        'telegram':lambda:TelegramClient('fixture-token','fixture-chat'),
+        'bark':lambda:BarkClient('https://example.com/fixture'),
+        'ntfy':lambda:NtfyClient('https://example.com/fixture'),
+        'gotify':lambda:GotifyClient('https://example.com','fixture-token'),
+        'pushplus':lambda:PushPlusClient('fixture-token'),
+        'webhook':lambda:WebhookClient(webhook_url='https://example.com/fixture',
+            webhook_body='{"content":"{{content}}","link":"{{desktop_link}}"}'),
+    }
+    metrics='当前均价：¥5200.00\n历史均价：¥5300.00\n已售出均价：¥4800.00\n售出最低价：¥4500.00'
+    asyncio.run(clients[channel]().send({'notification_type':'price_summary','商品标题':'价格摘要 · Fixture'},metrics))
+    import json
+    text=json.dumps(captured,ensure_ascii=False,default=lambda value:value.decode() if isinstance(value,bytes) else str(value))
+    for label in ['当前均价','历史均价','已售出均价','售出最低价']:assert label in text
+    for forbidden in ['新推荐','N/A','手机端链接','电脑端链接','goofish.com','href=','原因:']:assert forbidden not in text
+    if channel=='bark':assert 'url' not in captured['json']
+    if channel=='telegram':assert captured['json']['disable_web_page_preview'] is True

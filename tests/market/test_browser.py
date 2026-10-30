@@ -99,14 +99,14 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             screenshot_dir=ROOT/'docs/screenshots'
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
-                page.screenshot(path=str(screenshot_dir/'result-revisits-sold.png'),full_page=True)
+                pass  # previous PR owns the result-distribution screenshot
             page.set_viewport_size({'width':390,'height':844})
             page.evaluate("document.documentElement.classList.add('dark')")
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
             expect(page.get_by_text('¥4,500',exact=True).first).to_have_css('color','rgb(241, 245, 249)')
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
-                page.screenshot(path=str(screenshot_dir/'result-revisits-sold-mobile.png'),full_page=True)
+                pass  # previous PR owns the mobile result screenshot
             page.reload()
             expect(page.get_by_role('heading',name='结果查看',exact=True)).to_be_visible()
             assert page.locator('#password').count()==0
@@ -114,11 +114,48 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             page.goto(f'http://127.0.0.1:{port}/tasks')
             page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
             expect(page.get_by_label('启用定时回访',exact=True)).to_be_checked()
-            expect(page.get_by_label('回访定时规则（Cron）',exact=True)).to_have_value('30 9 * * *')
+            expect(page.get_by_label('回访频率',exact=True)).to_have_value('daily')
+            expect(page.get_by_label('小时',exact=True)).to_have_value('9')
+            expect(page.get_by_label('分钟',exact=True)).to_have_value('30')
+            assert page.get_by_label('回访定时规则（Cron）',exact=True).count()==0
+            page.get_by_label('回访频率',exact=True).select_option('weekend')
+            page.get_by_label('小时',exact=True).select_option('12')
+            page.get_by_label('分钟',exact=True).select_option('5')
+            expect(page.get_by_text('周末（周六、周日） 12:05（上海时间）',exact=True)).to_be_visible()
             expect(page.get_by_label('每次最多检查商品数',exact=True)).to_have_value('20')
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
-                page.screenshot(path=str(screenshot_dir/'result-revisits-task.png'),full_page=True)
+                page.screenshot(path=str(screenshot_dir/'simple-revisit-schedule.png'),full_page=True)
+            page.set_viewport_size({'width':390,'height':844})
+            page.get_by_label('回访频率',exact=True).scroll_into_view_if_needed()
+            assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.wait_for_timeout(500)
+                page.screenshot(path=str(screenshot_dir/'simple-revisit-schedule-mobile.png'),full_page=True)
+            page.set_viewport_size({'width':1440,'height':1000})
+            # Submit through the real form and API, then reopen to check persisted selections.
+            page.locator('button[type="submit"][form="task-form"]').click()
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
+            expect(page.get_by_label('回访频率',exact=True)).to_have_value('weekend')
+            expect(page.get_by_label('小时',exact=True)).to_have_value('12')
+            expect(page.get_by_label('分钟',exact=True)).to_have_value('5')
+            with sqlite_connection() as conn:
+                assert conn.execute('SELECT revisit_cron FROM tasks WHERE id=?',(task.id,)).fetchone()[0]=='5 12 * * sat,sun'
+            # Complex legacy rules survive saving unrelated fields.
+            page.keyboard.press('Escape')
+            response=page.request.patch(f'http://127.0.0.1:{port}/api/tasks/{task.id}',data={'revisit_cron':'*/20 * * * *'})
+            assert response.status==200
+            page.reload()
+            page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
+            expect(page.get_by_label('回访频率',exact=True)).to_have_value('custom')
+            expect(page.get_by_label('小时',exact=True)).to_be_disabled()
+            page.get_by_label('每次最多检查商品数',exact=True).fill('21')
+            page.locator('button[type="submit"][form="task-form"]').click()
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            with sqlite_connection() as conn:
+                saved=conn.execute('SELECT revisit_cron,revisit_limit FROM tasks WHERE id=?',(task.id,)).fetchone()
+                assert tuple(saved)==('*/20 * * * *',21)
             assert errors==[]
             browser.close()
     finally:

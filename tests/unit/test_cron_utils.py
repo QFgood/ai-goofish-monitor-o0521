@@ -24,3 +24,16 @@ def test_validate_cron_expression_rejects_invalid_value():
         return
 
     raise AssertionError("非法 cron 应该抛出 ValueError")
+
+
+def test_named_weekend_from_time_picker_fires_only_saturday_and_sunday():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    zone=ZoneInfo('Asia/Shanghai')
+    trigger=build_cron_trigger('5 12 * * sat,sun',timezone=zone)
+    saturday=trigger.get_next_fire_time(None,datetime(2026,10,30,13,0,tzinfo=zone))
+    assert (saturday.weekday(),saturday.hour,saturday.minute)==(5,12,5)
+    sunday=trigger.get_next_fire_time(saturday,saturday)
+    assert sunday.weekday()==6
+    following=trigger.get_next_fire_time(sunday,sunday)
+    assert following.weekday()==5

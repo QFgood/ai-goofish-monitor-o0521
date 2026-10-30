@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/toast'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import TaskRegionSelector from '@/components/tasks/TaskRegionSelector.vue'
+import RevisitSchedulePicker from '@/components/tasks/RevisitSchedulePicker.vue'
 
 type FormMode = 'create' | 'edit'
 type EmittedData = TaskGenerateRequest | Partial<Task>
@@ -270,7 +271,7 @@ function handleSubmit() {
         <label class="flex items-center gap-2"><input v-model="form.revisit_enabled" type="checkbox" />启用定时回访</label>
         <p class="text-xs text-slate-500">只检查该任务已登记的商品链接，不重新搜索。新商品从次日开始；已售停止回访。时间为上海时区。</p>
         <div v-if="form.revisit_enabled" class="grid gap-3 sm:grid-cols-2">
-          <div class="sm:col-span-2"><Label for="revisit-cron">回访定时规则（Cron）</Label><Input id="revisit-cron" v-model="form.revisit_cron" placeholder="30 9 * * *" required /><p class="text-xs text-slate-500 mt-1">默认每天09:30；例如 0 20 * * * 为每天20:00。</p></div>
+          <RevisitSchedulePicker v-model="form.revisit_cron" class="sm:col-span-2" />
           <div><Label for="revisit-limit">每次最多检查商品数</Label><Input id="revisit-limit" v-model.number="form.revisit_limit" type="number" min="1" max="100" required /></div>
           <div><Label for="revisit-days">追踪天数</Label><Input id="revisit-days" v-model.number="form.revisit_days" type="number" min="1" max="365" required /></div>
         </div>

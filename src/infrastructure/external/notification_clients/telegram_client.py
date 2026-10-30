@@ -2,6 +2,7 @@
 Telegram 通知客户端
 """
 import asyncio
+from html import escape
 from typing import Dict
 
 import requests
@@ -37,24 +38,27 @@ class TelegramClient(NotificationClient):
             raise RuntimeError("Telegram 未启用")
 
         message = self._build_message(product_data, reason)
-        telegram_message = [
-            "🚨 <b>新推荐!</b>",
-            "",
-            f"<b>{message.title[:50]}{'...' if len(message.title) > 50 else ''}</b>",
-            "",
-            f"💰 价格: {message.price}",
-            f"📝 原因: {message.reason}",
-        ]
-        if message.mobile_link:
-            telegram_message.append(f"📱 <a href='{message.mobile_link}'>手机端链接</a>")
-        telegram_message.append(f"💻 <a href='{message.desktop_link}'>电脑端链接</a>")
+        if message.is_price_summary:
+            telegram_message = [f"<b>{escape(message.notification_title)}</b>", "", escape(message.content)]
+        else:
+            telegram_message = [
+                "🚨 <b>新推荐!</b>",
+                "",
+                f"<b>{message.title[:50]}{'...' if len(message.title) > 50 else ''}</b>",
+                "",
+                f"💰 价格: {message.price}",
+                f"📝 原因: {message.reason}",
+            ]
+            if message.mobile_link:
+                telegram_message.append(f"📱 <a href='{message.mobile_link}'>手机端链接</a>")
+            telegram_message.append(f"💻 <a href='{message.desktop_link}'>电脑端链接</a>")
 
         telegram_api_url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"
         telegram_payload = {
             "chat_id": self.chat_id,
             "text": "\n".join(telegram_message),
             "parse_mode": "HTML",
-            "disable_web_page_preview": False
+            "disable_web_page_preview": message.is_price_summary
         }
 
         headers = {"Content-Type": "application/json"}

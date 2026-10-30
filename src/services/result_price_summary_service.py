@@ -155,7 +155,8 @@ async def send_result_price_summary(keyword, task_name, run_id, sender):
     from src.infrastructure.persistence.storage_names import build_result_filename
     filename = build_result_filename(keyword)
     insights = await result_price_insights(filename)
-    if insights['market_summary']['sample_count'] == 0:
+    sold_insights = await result_price_insights(filename, listing_state='sold')
+    if insights['market_summary']['sample_count'] == 0 and sold_insights['market_summary']['sample_count'] == 0:
         return False
     key = 'price_summary:' + hashlib.sha256((keyword+'\0'+run_id).encode()).hexdigest()
     with sqlite_connection() as conn:
@@ -163,12 +164,17 @@ async def send_result_price_summary(keyword, task_name, run_id, sender):
             return False
         conn.commit()
     current, history = insights['market_summary'], insights['history_summary']
-    history_text = f"¥{history['avg_price']}（{history['sample_count']}个商品日样本）" if history['avg_price'] is not None else '暂无有效样本'
-    reason = (f"任务：{task_name}\n当前均价：¥{current['avg_price']}（{current['sample_count']}件）\n"
-              f"历史均价：{history_text}\n疑似低价/价格范围排除：{insights['price_filter']['excluded_count']}件\n"
-              "历史按每商品每日最后挂牌价统计；参考价不等于真实成交价。")
+    sold = sold_insights['market_summary']
+    def display_price(value):
+        return f"¥{value:.2f}" if value is not None else '暂无有效样本'
+    reason = '\n'.join([
+        f"当前均价：{display_price(current['avg_price'])}",
+        f"历史均价：{display_price(history['avg_price'])}",
+        f"已售出均价：{display_price(sold['avg_price'])}",
+        f"售出最低价：{display_price(sold['min_price'])}",
+    ])
     try:
-        await sender({'商品标题': f'价格摘要 · {task_name}', '当前售价': 'N/A', '商品链接': 'https://www.goofish.com/'}, reason)
+        await sender({'notification_type': 'price_summary', '商品标题': f'价格摘要 · {task_name}'}, reason)
     except Exception:
         with sqlite_connection() as conn:
             conn.execute("UPDATE app_metadata SET value='failed' WHERE key=?", (key,))
