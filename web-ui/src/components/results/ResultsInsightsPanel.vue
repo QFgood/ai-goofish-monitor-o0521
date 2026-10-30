@@ -3,7 +3,7 @@ import type { ResultInsights } from '@/types/result.d.ts'
 import PriceDistributionChart from './PriceDistributionChart.vue'
 const props=defineProps<{insights:ResultInsights|null;selectedTaskLabel?:string|null;listingState?:'active'|'sold'}>()
 const emit=defineEmits<{(e:'select-range',min:number,max:number):void;(e:'change-state',state:'active'|'sold'):void}>()
-const runStatus=(status:string)=>({completed:'已完成',access_paused:'登录或访问受限，回访已暂停，请更新登录态后重新启用',failed:'失败，队列保留等待重试',interrupted:'中断，队列保留',running:'运行中'}[status] || status)
+const runStatus=(status:string)=>({completed:'已完成',empty:'暂无可回访商品，请先采集或检查追踪期限',access_paused:'登录或访问受限，回访已暂停，请更新登录态后重新启用',failed:'失败，队列保留等待重试',interrupted:'中断，队列保留',running:'运行中'}[status] || status)
 const price=(value:number|null|undefined)=>value==null?'—':`¥${value.toLocaleString('zh-CN',{maximumFractionDigits:2})}`
 </script>
 <template>

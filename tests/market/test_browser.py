@@ -69,7 +69,8 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
         else:
             pytest.fail('local fixture server did not start')
         with sqlite_connection() as conn:
-            conn.execute("UPDATE result_listing_memberships SET next_review_at='2026-10-31T12:00:00+08:00' WHERE item_id='990001'");conn.commit()
+            conn.execute("UPDATE result_listing_memberships SET next_review_at='2026-10-31T12:00:00+08:00' WHERE item_id='990001'")
+            conn.execute('UPDATE tasks SET enabled=1 WHERE id=?',(task.id,));conn.commit()
         with sync_playwright() as playwright:
             browser=playwright.chromium.launch(executable_path='/usr/bin/chromium',headless=True)
             context=browser.new_context(viewport={'width':1440,'height':1000},locale='zh-CN')
@@ -85,7 +86,7 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             assert page.get_by_text('离线 Fixture · 25元商品',exact=True).count()==0
             expect(page.get_by_text('下次回访：2026-10-31 12:00（上海时间）',exact=False).first).to_be_visible()
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
-                page.locator('.group.flex.flex-col').filter(has_text='下次回访：2026-10-31 12:00').first.screenshot(path=str(ROOT/'docs/screenshots/revisit-next-time-card.png'))
+                pass  # card screenshot belongs to the previous PR
             checkbox=page.get_by_label('排除疑似低价引流（至少5件样本，低于中位数20%）')
             checkbox.uncheck()
             expect(page.get_by_text('离线 Fixture · 25元商品',exact=True)).to_be_visible()
@@ -116,6 +117,8 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             expect(page.get_by_role('heading',name='结果查看',exact=True)).to_be_visible()
             assert page.locator('#password').count()==0
             page.set_viewport_size({'width':1440,'height':1000})
+            with sqlite_connection() as conn:
+                conn.execute('UPDATE tasks SET enabled=0 WHERE id=?',(task.id,));conn.commit()
             page.goto(f'http://127.0.0.1:{port}/tasks')
             page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
             expect(page.get_by_label('启用定时回访',exact=True)).to_be_checked()
@@ -136,17 +139,17 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
 
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
-                page.screenshot(path=str(screenshot_dir/'unified-schedule-settings.png'),full_page=True)
+                pass  # existing schedule screenshots belong to the previous PR
             page.set_viewport_size({'width':390,'height':844})
             page.get_by_label('回访频率',exact=True).scroll_into_view_if_needed()
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)
-                page.screenshot(path=str(screenshot_dir/'unified-schedule-settings-mobile.png'),full_page=True)
+                pass  # existing schedule screenshots belong to the previous PR
             page.get_by_label('采集频率',exact=True).scroll_into_view_if_needed()
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
                 page.wait_for_timeout(500)
-                page.screenshot(path=str(screenshot_dir/'collection-schedule-mobile.png'),full_page=True)
+                pass  # existing schedule screenshots belong to the previous PR
             page.set_viewport_size({'width':1440,'height':1000})
             # Submit through the real form and API, then reopen to check persisted selections.
             page.locator('button[type="submit"][form="task-form"]').click()
@@ -174,6 +177,46 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
                 saved=conn.execute('SELECT revisit_cron,revisit_limit FROM tasks WHERE id=?',(task.id,)).fetchone()
                 assert tuple(saved)==('*/20 * * * *',21)
                 assert conn.execute('SELECT cron FROM tasks WHERE id=?',(task.id,)).fetchone()[0]=='0 8,12,18 * * *'
+            # Manual action UI: route only this POST to an offline fixture result.
+            # Enabling the DB row directly does not reload the scheduler's disabled jobs.
+            posted=[]
+            fixture_run='00000000-0000-4000-8000-000000000007'
+            def manual_fixture(route):
+                assert route.request.method=='POST'
+                posted.append(route.request.url)
+                with sqlite_connection() as conn:
+                    conn.execute("INSERT INTO result_revisit_runs(run_id,task_id,started_at,lease_until,status) VALUES(?,?,?,?,'running')",
+                        (fixture_run,task.id,stamp(),stamp(now()+timedelta(minutes=2))))
+                    conn.commit()
+                route.fulfill(status=202,json={'run_id':fixture_run,'status':'running'})
+            page.route(f'http://127.0.0.1:{port}/api/tasks/{task.id}/revisits/run',manual_fixture)
+            with sqlite_connection() as conn:
+                conn.execute('UPDATE tasks SET enabled=1,revisit_enabled=0 WHERE id=?',(task.id,));conn.commit()
+            page.reload()
+            revisit=page.locator('button[aria-label="回访 离线 Fixture · 回访任务"]:visible')
+            start=page.locator('button[aria-label="启动 离线 Fixture · 回访任务"]:visible')
+            expect(revisit).to_be_enabled()
+            assert revisit.bounding_box()['y']>start.bounding_box()['y']
+            revisit.click()
+            expect(revisit).to_be_disabled()
+            expect(page.locator('[role="status"]:visible').filter(has_text='回访中 · 已检查 0 件')).to_be_visible()
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.wait_for_timeout(500)
+                page.screenshot(path=str(screenshot_dir/'manual-revisit-desktop.png'),full_page=True)
+            with sqlite_connection() as conn:
+                conn.execute("UPDATE result_revisit_runs SET status='completed',reviewed=2,sold=1,finished_at=? WHERE run_id=?",(stamp(),fixture_run));conn.commit()
+            expect(page.locator('[role="status"]:visible').filter(has_text='回访完成：检查 2 件，新确认已售 1 件')).to_be_visible(timeout=10000)
+            expect(revisit).to_be_enabled()
+            assert len(posted)==1
+            page.reload()
+            expect(page.locator('[role="status"]:visible').filter(has_text='回访完成：检查 2 件，新确认已售 1 件')).to_be_visible()
+            page.set_viewport_size({'width':390,'height':844})
+            revisit=page.locator('button[aria-label="回访 离线 Fixture · 回访任务"]:visible')
+            expect(revisit).to_be_visible()
+            assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.wait_for_timeout(500)
+                page.screenshot(path=str(screenshot_dir/'manual-revisit-mobile.png'),full_page=True)
             assert errors==[]
             browser.close()
     finally:

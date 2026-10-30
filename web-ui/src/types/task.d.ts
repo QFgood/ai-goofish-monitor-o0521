@@ -1,3 +1,8 @@
+export interface TaskRevisitRun {
+  run_id:string; status:string; reviewed:number; sold:number;
+  started_at?:string; finished_at?:string|null; lease_until?:string|null;
+}
+
 // Based on the Pydantic model in the backend
 
 export interface Task {
@@ -27,6 +32,7 @@ export interface Task {
   decision_mode: 'ai' | 'keyword';
   keyword_rules: string[];
   is_running: boolean;
+  revisit_run?: TaskRevisitRun|null;
 }
 
 export type TaskGenerationStatus = 'queued' | 'running' | 'completed' | 'failed';

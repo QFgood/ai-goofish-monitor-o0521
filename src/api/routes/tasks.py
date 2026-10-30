@@ -1,7 +1,7 @@
 """
 任务管理路由
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import List
 import os
@@ -29,6 +29,17 @@ from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.price_history_service import delete_price_snapshots
 from src.services.result_storage_service import delete_result_file_records
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+def _attach_revisit_runs(payloads, service):
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    with sqlite_connection(getattr(service.repository,'db_path',None)) as conn:
+        rows=conn.execute('''SELECT * FROM result_revisit_runs WHERE rowid IN
+            (SELECT max(rowid) FROM result_revisit_runs GROUP BY task_id)''').fetchall()
+    by_task={row['task_id']:dict(row) for row in rows}
+    for payload in payloads:
+        payload['revisit_run']=by_task.get(payload['id'])
+    return payloads
+
 
 async def _reload_scheduler_if_needed(
     task_service: TaskService,
@@ -62,7 +73,7 @@ async def get_tasks(
 ):
     """获取所有任务"""
     tasks = await service.get_all_tasks()
-    return serialize_tasks(tasks, scheduler_service)
+    return _attach_revisit_runs(serialize_tasks(tasks,scheduler_service),service)
 @router.get("/{task_id}", response_model=dict)
 async def get_task(
     task_id: int,
@@ -73,7 +84,7 @@ async def get_task(
     task = await service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
-    return serialize_task(task, scheduler_service)
+    return _attach_revisit_runs([serialize_task(task,scheduler_service)],service)[0]
 @router.post("/", response_model=dict)
 async def create_task(
     task_create: TaskCreate,
@@ -295,3 +306,24 @@ async def get_result_revisit_status(task_id: int, service: TaskService = Depends
         row=conn.execute('''SELECT count(*) AS registered,min(next_review_at) AS next_review_at
             FROM result_listing_memberships WHERE task_id=? AND archived=0''',(task_id,)).fetchone()
     return {'runs':runs, **dict(row)}
+
+
+@router.post('/{task_id}/revisits/run',status_code=202)
+async def start_manual_result_revisit(task_id: int,request: Request,service: TaskService=Depends(get_task_service)):
+    task=await service.get_task(task_id)
+    if not task:
+        raise HTTPException(404,'任务未找到')
+    if not task.enabled:
+        raise HTTPException(400,'请先启用任务，再手动回访')
+    manager=getattr(request.app.state,'result_revisit_manager',None)
+    if manager is None:
+        from src.services.result_revisit_manager import ResultRevisitManager
+        from src.services.result_revisit_service import ResultRevisitService
+        manager=ResultRevisitManager(ResultRevisitService(db_path=getattr(service.repository,'db_path',None)))
+        request.app.state.result_revisit_manager=manager
+    result=manager.start(task_id)
+    if result['status']=='busy':
+        raise HTTPException(409,'此任务已有回访正在运行，请等待完成')
+    if result['status']=='disabled':
+        raise HTTPException(400,'任务已停用')
+    return result
