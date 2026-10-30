@@ -164,7 +164,7 @@ async function handleSaveBlacklistRules() {
       <label class="text-sm flex gap-2 items-center"><input v-model="filters.exclude_low_price" type="checkbox"/>排除疑似低价引流（至少5件样本，低于中位数20%）</label>
       <Button variant="outline" @click="filters.min_price=undefined;filters.max_price=undefined">清除价格范围</Button>
     </div>
-    <ResultsInsightsPanel :insights="insights" :selected-task-label="selectedTaskLabel" @select-range="(min,max)=>{filters.min_price=min;filters.max_price=max}" />
+    <ResultsInsightsPanel :listing-state="filters.listing_state" @change-state="filters.listing_state = $event" :insights="insights" :selected-task-label="selectedTaskLabel" @select-range="(min,max)=>{filters.min_price=min;filters.max_price=max}" />
 
     <ResultsGrid :results="results" :is-loading="isLoading" @toggle-block="toggleItemBlock" />
     <div class="flex flex-wrap justify-between gap-3 items-center mt-5 text-sm text-slate-500">

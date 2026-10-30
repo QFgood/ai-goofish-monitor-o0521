@@ -92,13 +92,13 @@ class SqliteTaskRepository(TaskRepository):
                     max_pages, personal_only, min_price, max_price, cron,
                     ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                     account_strategy, free_shipping, new_publish_option, region,
-                    decision_mode, keyword_rules_json, is_running
+                    decision_mode, keyword_rules_json, is_running, revisit_enabled, revisit_cron, revisit_limit, revisit_days
                 ) VALUES (
                     :id, :task_name, :enabled, :keyword, :description, :analyze_images,
                     :max_pages, :personal_only, :min_price, :max_price, :cron,
                     :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
                     :account_strategy, :free_shipping, :new_publish_option, :region,
-                    :decision_mode, :keyword_rules_json, :is_running
+                    :decision_mode, :keyword_rules_json, :is_running, :revisit_enabled, :revisit_cron, :revisit_limit, :revisit_days
                 )
                 """,
                 payload,
@@ -112,12 +112,16 @@ class SqliteTaskRepository(TaskRepository):
             legacy_config_file=self.legacy_config_file,
         )
         with sqlite_connection(self.db_path) as conn:
+            conn.execute("UPDATE result_listing_memberships SET archived=1 WHERE task_id=?", (task_id,))
             cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
             conn.commit()
         return cursor.rowcount > 0
 
     def _next_task_id(self, conn) -> int:
-        row = conn.execute("SELECT COALESCE(MAX(id), -1) AS max_id FROM tasks").fetchone()
+        # Retained revisit history must never become associated with a new task.
+        row = conn.execute("""SELECT COALESCE(MAX(id), -1) AS max_id FROM (
+            SELECT id FROM tasks UNION ALL SELECT task_id AS id FROM result_listing_memberships
+            UNION ALL SELECT task_id AS id FROM result_revisit_runs)""").fetchone()
         return int(row["max_id"]) + 1
 
     def _task_values(self, task: Task) -> dict:

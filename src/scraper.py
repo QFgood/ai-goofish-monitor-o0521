@@ -1120,13 +1120,14 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
 
                                 # 构建基础记录
                                 final_record = {
+                                    "任务ID": task_config.get("id"),
                                     "爬取时间": datetime.now().isoformat(),
                                     "搜索关键字": keyword,
                                     "任务名称": task_config.get(
                                         "task_name", "Untitled Task"
                                     ),
                                     "商品信息": item_data,
-                                    "卖家信息": {},
+                                    "卖家信息": {"卖家ID": str(user_id) if user_id else None},
                                 }
                                 price_reference = build_market_reference(
                                     keyword=keyword,

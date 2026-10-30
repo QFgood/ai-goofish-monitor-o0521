@@ -283,7 +283,7 @@ onMounted(fetchAccountOptions)
         <DialogHeader>
           <DialogTitle>{{ t('tasks.deleteDialog.title') }}</DialogTitle>
           <DialogDescription>
-            {{ taskToDelete ? t('tasks.deleteDialog.descriptionWithTask', { task: taskToDelete.task_name }) : t('tasks.deleteDialog.descriptionFallback') }}
+            删除任务后停止该任务的采集和回访。已有回访登记的商品及价格历史会保留；未登记回访的任务沿用原有结果清理规则。
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

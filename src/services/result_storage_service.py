@@ -191,6 +191,8 @@ def _save_result_record_sync(record: dict, keyword: str) -> bool:
                 json.dumps(record, ensure_ascii=False),
             ),
         )
+        from src.services.result_revisit_service import register_saved_result
+        register_saved_result(conn, record, keyword)
         conn.commit()
     return True
 
@@ -311,6 +313,7 @@ async def load_all_result_records(
     sort_by: str,
     sort_order: str,
     include_hidden: bool = False,
+    include_visibility: bool = False,
 ) -> list[dict]:
     return await asyncio.to_thread(
         _load_all_result_records_sync,
@@ -320,6 +323,7 @@ async def load_all_result_records(
         sort_by,
         sort_order,
         include_hidden,
+        include_visibility,
     )
 
 
@@ -330,6 +334,7 @@ def _load_all_result_records_sync(
     sort_by: str,
     sort_order: str,
     include_hidden: bool,
+    include_visibility: bool = False,
 ) -> list[dict]:
     bootstrap_sqlite_storage()
     with sqlite_connection() as conn:
@@ -343,6 +348,8 @@ def _load_all_result_records_sync(
             include_hidden=include_hidden,
         )
 
+    if include_visibility:
+        return records
     # Bulk loading/export returns stored records; UI-only visibility fields belong to paginated queries.
     visibility_fields = {"_status", "_matched_blacklist_keywords", "_hidden_reason", "_effective_hidden"}
     return [{key: value for key, value in record.items() if key not in visibility_fields} for record in records]

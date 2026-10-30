@@ -8,6 +8,7 @@ from statistics import median
 
 from src.services.price_history_service import parse_price_value, load_price_snapshots, _summarize_prices
 from src.services.result_storage_service import load_all_result_records
+from src.services.result_revisit_service import tracked_records
 from src.infrastructure.persistence.sqlite_connection import sqlite_connection
 
 
@@ -90,13 +91,20 @@ def apply_filtered_market_context(enriched, records):
 
 
 async def result_price_insights(filename, *, ai_recommended_only=False, keyword_recommended_only=False,
-                                include_hidden=False, min_price=None, max_price=None, exclude_low_price=True):
+                                include_hidden=False, min_price=None, max_price=None, exclude_low_price=True, listing_state="active"):
     records = await load_all_result_records(filename, ai_recommended_only=ai_recommended_only,
-        keyword_recommended_only=keyword_recommended_only, include_hidden=include_hidden, sort_by='crawl_time', sort_order='desc')
+        keyword_recommended_only=keyword_recommended_only, include_hidden=include_hidden or listing_state=='sold', include_visibility=True, sort_by='crawl_time', sort_order='desc')
+    records = tracked_records(records, listing_state, include_hidden)
     selected, policy = select_priced_results(records, min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
     ids = {str(r.get('商品信息', {}).get('商品ID') or r.get('商品信息', {}).get('商品链接') or '') for r in selected}
     keyword = filename.removesuffix('_full_data.jsonl')
     snapshots = load_price_snapshots(keyword)
+    with sqlite_connection() as conn:
+        observations = [{'item_id':r['item_id'], 'price':r['price']/100,
+                         'snapshot_time':r['observed_at']} for r in conn.execute(
+            'SELECT item_id,price,observed_at FROM result_listing_observations WHERE parsed_status=? AND price IS NOT NULL',
+            ('sold' if listing_state=='sold' else 'active',))]
+    snapshots = observations if listing_state=='sold' else snapshots + observations
     # Use each item's last observation per day; never invent samples or overweight rapid retries.
     daily_latest = {}
     eligible = []
@@ -127,13 +135,20 @@ async def result_price_insights(filename, *, ai_recommended_only=False, keyword_
     by_day = defaultdict(list)
     for (day, _), row in daily_latest.items():
         by_day[day].append(row)
-    return {'market_summary': summarize_result_prices(selected),
+    with sqlite_connection() as conn:
+        runs = [dict(r) for r in conn.execute('''SELECT r.*,t.task_name,t.revisit_enabled FROM result_revisit_runs r
+            LEFT JOIN tasks t ON t.id=r.task_id WHERE r.task_id IN
+            (SELECT task_id FROM result_listing_memberships WHERE filename=?)
+            ORDER BY r.started_at DESC LIMIT 5''',(filename,))]
+    return {'revisit_runs': runs, 'market_summary': summarize_result_prices(selected),
             'history_summary': {'unique_items': len({r['item_id'] for r in historical}), **_summarize_prices(historical)},
             'price_distribution': build_price_distribution(selected), 'price_filter': policy,
             'daily_trend': [{'day': day, **_summarize_prices(rows)} for day, rows in sorted(by_day.items())], 'latest_snapshot_at': latest, 'total_items': len(selected),
             'summary_scope': '全部筛选结果（非仅当前分页）',
-            'history_basis': '最近快照起30天内，每商品每天最后挂牌价；仅包含当前筛选商品',
-            'price_note': '均为挂牌观察价，不是成交价'}
+            'history_basis': ('最近快照起30天内，每商品每天最后已售页展示价' if listing_state=='sold' else '最近快照起30天内，每商品每天最后挂牌价')+'；仅包含当前筛选商品',
+            'listing_state': listing_state,
+            'missing_price_count': len(selected)-summarize_result_prices(selected)['sample_count'],
+            'price_note': '已售页展示价，不是实际成交价' if listing_state=='sold' else '均为挂牌观察价，不是成交价'}
 
 
 async def send_result_price_summary(keyword, task_name, run_id, sender):

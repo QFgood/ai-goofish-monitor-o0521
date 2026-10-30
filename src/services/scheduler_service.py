@@ -55,6 +55,11 @@ class SchedulerService:
         self.scheduler.remove_all_jobs()
 
         for task in tasks:
+            if task.enabled and task.revisit_enabled:
+                self.scheduler.add_job(self._run_revisit,
+                    trigger=build_cron_trigger(task.revisit_cron, timezone=self.scheduler.timezone),
+                    args=[task.id], id=f"revisit_{task.id}", replace_existing=True,
+                    max_instances=1, coalesce=True, misfire_grace_time=3600)
             if task.enabled and task.cron:
                 try:
                     trigger = build_cron_trigger(
@@ -79,3 +84,9 @@ class SchedulerService:
         """执行定时任务"""
         print(f"定时任务触发: 正在为任务 '{task_name}' 启动爬虫...")
         await self.process_service.start_task(task_id, task_name)
+
+    async def _run_revisit(self, task_id: int):
+        from src.services.result_revisit_service import ResultRevisitService
+        await ResultRevisitService().run(task_id)
+        from src.api.routes.websocket import broadcast_message
+        await broadcast_message("results_updated", {"task_id": task_id})

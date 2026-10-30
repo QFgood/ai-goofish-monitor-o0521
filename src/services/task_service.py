@@ -24,7 +24,9 @@ class TaskService:
     async def create_task(self, task_create: TaskCreate) -> Task:
         """创建新任务"""
         task = Task(**task_create.model_dump(), is_running=False)
-        return await self.repository.save(task)
+        saved = await self.repository.save(task)
+        await self._register_existing(saved)
+        return saved
 
     async def update_task(self, task_id: int, task_update: TaskUpdate) -> Task:
         """更新任务"""
@@ -33,7 +35,9 @@ class TaskService:
             raise ValueError(f"任务 {task_id} 不存在")
 
         updated_task = task.apply_update(task_update)
-        return await self.repository.save(updated_task)
+        saved = await self.repository.save(updated_task)
+        await self._register_existing(saved)
+        return saved
 
     async def delete_task(self, task_id: int) -> bool:
         """删除任务"""
@@ -43,3 +47,9 @@ class TaskService:
         """更新任务运行状态"""
         task_update = TaskUpdate(is_running=is_running)
         return await self.update_task(task_id, task_update)
+
+    async def _register_existing(self, task):
+        if task.revisit_enabled:
+            import asyncio
+            from src.services.result_revisit_service import ResultRevisitService
+            await asyncio.to_thread(ResultRevisitService().sync_existing, task.model_dump())

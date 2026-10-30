@@ -446,3 +446,35 @@ def test_price_distribution_and_cards_export_share_filters(tmp_path, monkeypatch
     exported=client.get(f'/api/results/{filename}/export',params={'min_price':5100,'max_price':5300})
     import csv, io
     assert len(list(csv.DictReader(io.StringIO(exported.text))))==3
+
+
+def test_sold_toggle_exposes_only_explicit_sold_page_prices(tmp_path,monkeypatch):
+    import asyncio
+    from src.domain.models.task import TaskCreate
+    from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    from src.services.task_service import TaskService
+    from src.services.result_storage_service import save_result_record
+    from src.services.result_revisit_service import ResultRevisitService
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('APP_DATABASE_FILE',str(tmp_path/'api.sqlite3'))
+    task=asyncio.run(TaskService(SqliteTaskRepository()).create_task(TaskCreate(task_name='Sold fixture',keyword='mini',
+        decision_mode='keyword',keyword_rules=['mini'],revisit_enabled=True)))
+    for item,price in [('1001',5000),('1002',6000)]:
+        asyncio.run(save_result_record({'任务名称':task.task_name,'商品信息':{'商品ID':item,'商品标题':'Fixture',
+            '当前售价':price,'商品链接':'https://www.goofish.com/item?id='+item},'卖家信息':{}},'mini'))
+    with sqlite_connection() as conn:
+        conn.execute("UPDATE result_listing_items SET worker_id='fixture' WHERE item_id='1001'");conn.commit()
+    ResultRevisitService().observe('1001','fixture',{'raw_status':1,'price':4500,'request_ok':True,'page_complete':True},task.model_dump())
+    app=FastAPI();app.include_router(results.router);client=TestClient(app)
+    base='/api/results/mini_full_data.jsonl'
+    active=client.get(base).json()
+    assert active['total_items']==1 and active['items'][0]['商品信息']['商品ID']=='1002'
+    sold=client.get(base,params={'listing_state':'sold'}).json()
+    assert sold['items'][0]['商品信息']['当前售价']==4500
+    assert sold['items'][0]['listing_tracking']['first_seen_sold_at']
+    stats=client.get(base+'/insights',params={'listing_state':'sold'}).json()
+    assert stats['market_summary']['avg_price']==4500
+    csv=client.get(base+'/export',params={'listing_state':'sold'}).text
+    assert '已售页展示价' in csv and '4500' in csv and '6000' not in csv
+    assert client.get(base,params={'listing_state':'invalid'}).status_code==422

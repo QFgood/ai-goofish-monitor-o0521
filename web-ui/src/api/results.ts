@@ -2,6 +2,7 @@ import type { ResultInsights, ResultItem } from '@/types/result.d.ts'
 import { http } from '@/lib/http'
 
 export interface GetResultContentParams {
+  listing_state?: 'active' | 'sold';
   recommended_only?: boolean;
   ai_recommended_only?: boolean;
   keyword_recommended_only?: boolean;

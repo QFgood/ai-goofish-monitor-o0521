@@ -35,6 +35,20 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
                 '商品信息':item,'卖家信息':{},'ai_analysis':{'is_recommended':False,'reason':'离线 Fixture','analysis_source':'ai'}},'mini')
             record_market_snapshots(keyword='mini',task_name='离线 Fixture · Mini',items=[item],run_id='browser',snapshot_time=stamp())
     asyncio.run(seed())
+    from src.domain.models.task import TaskCreate
+    from src.services.task_service import TaskService
+    from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
+    from src.services.result_revisit_service import ResultRevisitService
+    from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+    task=asyncio.run(TaskService(SqliteTaskRepository()).create_task(TaskCreate(task_name='离线 Fixture · 回访任务',
+        keyword='mini',decision_mode='keyword',keyword_rules=['mini'],revisit_enabled=True,enabled=False)))
+    asyncio.run(save_result_record({'任务名称':task.task_name,'爬取时间':stamp(),'商品信息':{
+        '商品ID':'990006','商品标题':'离线 Fixture · 已售商品','当前售价':'6000',
+        '商品链接':'https://www.goofish.com/item?id=990006'},'卖家信息':{'卖家ID':'880001','卖家昵称':'离线卖家'}},'mini'))
+    with sqlite_connection() as conn:
+        conn.execute("UPDATE result_listing_items SET worker_id='browser-fixture' WHERE item_id='990006'");conn.commit()
+    ResultRevisitService().observe('990006','browser-fixture',{'raw_status':1,'price':'4500',
+        'request_ok':True,'page_complete':True,'evidence':'offline_fixture'},task.model_dump())
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0))
         port = sock.getsockname()[1]
@@ -76,17 +90,35 @@ def test_results_distribution_home_browser(tmp_path, monkeypatch):
             expect(page.get_by_text('有效价格 1 件',exact=True)).to_be_visible()
             page.get_by_role('button',name='清除价格范围',exact=True).click()
             expect(page.get_by_text('有效价格 5 件',exact=True)).to_be_visible()
+            page.get_by_role('button',name='已售展示价',exact=True).click()
+            expect(page.get_by_text('已售均价',exact=True)).to_be_visible()
+            expect(page.get_by_text('¥4,500',exact=True).first).to_be_visible()
+            expect(page.get_by_text('离线 Fixture · 已售商品',exact=True)).to_be_visible()
+            expect(page.get_by_text('离线 Fixture · 5000元商品',exact=True)).to_have_count(0)
+            expect(page.get_by_role('link',name='卖家主页 · 离线卖家',exact=True)).to_be_visible()
             screenshot_dir=ROOT/'docs/screenshots'
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
-                page.screenshot(path=str(screenshot_dir/'results-distribution.png'),full_page=True)
+                page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
+                page.screenshot(path=str(screenshot_dir/'result-revisits-sold.png'),full_page=True)
             page.set_viewport_size({'width':390,'height':844})
             page.evaluate("document.documentElement.classList.add('dark')")
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+            expect(page.get_by_text('¥4,500',exact=True).first).to_have_css('color','rgb(241, 245, 249)')
             if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
-                page.screenshot(path=str(screenshot_dir/'results-distribution-mobile.png'),full_page=True)
+                page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
+                page.screenshot(path=str(screenshot_dir/'result-revisits-sold-mobile.png'),full_page=True)
             page.reload()
             expect(page.get_by_role('heading',name='结果查看',exact=True)).to_be_visible()
             assert page.locator('#password').count()==0
+            page.set_viewport_size({'width':1440,'height':1000})
+            page.goto(f'http://127.0.0.1:{port}/tasks')
+            page.locator('button[aria-label="编辑 离线 Fixture · 回访任务"]:visible').click()
+            expect(page.get_by_label('启用定时回访',exact=True)).to_be_checked()
+            expect(page.get_by_label('回访定时规则（Cron）',exact=True)).to_have_value('30 9 * * *')
+            expect(page.get_by_label('每次最多检查商品数',exact=True)).to_have_value('20')
+            if os.environ.get('SENTINEL_CAPTURE_SCREENSHOTS')=='1':
+                page.wait_for_timeout(500)  # allow viewport/theme/dialog transitions to finish
+                page.screenshot(path=str(screenshot_dir/'result-revisits-task.png'),full_page=True)
             assert errors==[]
             browser.close()
     finally:

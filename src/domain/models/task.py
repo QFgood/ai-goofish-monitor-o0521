@@ -119,6 +119,10 @@ class Task(BaseModel):
     personal_only: bool
     min_price: Optional[str] = None
     max_price: Optional[str] = None
+    revisit_enabled: bool = False
+    revisit_cron: str = "30 9 * * *"
+    revisit_limit: int = Field(default=20, ge=1, le=100)
+    revisit_days: int = Field(default=30, ge=1, le=365)
     cron: Optional[str] = None
     ai_prompt_base_file: str
     ai_prompt_criteria_file: str
@@ -130,6 +134,15 @@ class Task(BaseModel):
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
     is_running: bool = False
+
+    @field_validator("revisit_cron")
+    @classmethod
+    def validate_revisit_cron(cls, value):
+        if value is None:
+            return value
+        if not validate_cron_expression(value):
+            raise ValueError("回访定时规则不能为空")
+        return validate_cron_expression(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -169,6 +182,10 @@ class TaskCreate(BaseModel):
     personal_only: bool = True
     min_price: Optional[str] = None
     max_price: Optional[str] = None
+    revisit_enabled: bool = False
+    revisit_cron: str = "30 9 * * *"
+    revisit_limit: int = Field(default=20, ge=1, le=100)
+    revisit_days: int = Field(default=30, ge=1, le=365)
     cron: Optional[str] = None
     ai_prompt_base_file: str = "prompts/base_prompt.txt"
     ai_prompt_criteria_file: str = ""
@@ -179,6 +196,15 @@ class TaskCreate(BaseModel):
     region: Optional[str] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+
+    @field_validator("revisit_cron")
+    @classmethod
+    def validate_revisit_cron(cls, value):
+        if value is None:
+            return value
+        if not validate_cron_expression(value):
+            raise ValueError("回访定时规则不能为空")
+        return validate_cron_expression(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -236,6 +262,10 @@ class TaskUpdate(BaseModel):
     personal_only: Optional[bool] = None
     min_price: Optional[str] = None
     max_price: Optional[str] = None
+    revisit_enabled: Optional[bool] = None
+    revisit_cron: Optional[str] = None
+    revisit_limit: Optional[int] = Field(default=None, ge=1, le=100)
+    revisit_days: Optional[int] = Field(default=None, ge=1, le=365)
     cron: Optional[str] = None
     ai_prompt_base_file: Optional[str] = None
     ai_prompt_criteria_file: Optional[str] = None
@@ -247,6 +277,15 @@ class TaskUpdate(BaseModel):
     decision_mode: Optional[Literal["ai", "keyword"]] = None
     keyword_rules: Optional[List[str]] = None
     is_running: Optional[bool] = None
+
+    @field_validator("revisit_cron")
+    @classmethod
+    def validate_revisit_cron(cls, value):
+        if value is None:
+            return value
+        if not validate_cron_expression(value):
+            raise ValueError("回访定时规则不能为空")
+        return validate_cron_expression(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -280,6 +319,9 @@ class TaskUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_partial_keyword_payload(self):
+        for name in ('revisit_enabled','revisit_cron','revisit_limit','revisit_days'):
+            if name in self.model_fields_set and getattr(self,name) is None:
+                raise ValueError('回访设置不能为null')
         if self.decision_mode == "keyword" and self.keyword_rules is not None:
             if not _has_keyword_rules(self.keyword_rules):
                 raise ValueError("关键词判断模式下，至少需要一个关键词。")
@@ -302,6 +344,10 @@ class TaskGenerateRequest(BaseModel):
     min_price: Optional[str] = None
     max_price: Optional[str] = None
     max_pages: int = 3
+    revisit_enabled: bool = False
+    revisit_cron: str = "30 9 * * *"
+    revisit_limit: int = Field(default=20, ge=1, le=100)
+    revisit_days: int = Field(default=30, ge=1, le=365)
     cron: Optional[str] = None
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"
@@ -310,6 +356,15 @@ class TaskGenerateRequest(BaseModel):
     region: Optional[str] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+
+    @field_validator("revisit_cron")
+    @classmethod
+    def validate_revisit_cron(cls, value):
+        if value is None:
+            return value
+        if not validate_cron_expression(value):
+            raise ValueError("回访定时规则不能为空")
+        return validate_cron_expression(value)
 
     @model_validator(mode="before")
     @classmethod

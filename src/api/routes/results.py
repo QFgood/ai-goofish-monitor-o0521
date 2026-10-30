@@ -4,6 +4,8 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from enum import Enum
+from typing import Literal
+from src.services.result_revisit_service import tracked_records
 
 from pydantic import BaseModel
 from urllib.parse import quote
@@ -92,6 +94,7 @@ async def get_result_file_content(
     min_price: float | None = Query(None, ge=0),
     max_price: float | None = Query(None, ge=0),
     exclude_low_price: bool = Query(True),
+    listing_state: Literal["active", "sold"] = "active",
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
 ):
@@ -108,8 +111,8 @@ async def get_result_file_content(
             raise ValueError("最低价不能高于最高价")
         _, decorated = await query_result_records(filename, ai_recommended_only=ai_recommended_only,
             keyword_recommended_only=keyword_recommended_only, sort_by=sort_by, sort_order=sort_order,
-            page=1, limit=2_147_483_647, include_hidden=include_hidden)
-        filtered, policy = select_priced_results(decorated, min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
+            page=1, limit=2_147_483_647, include_hidden=include_hidden or listing_state=='sold')
+        filtered, policy = select_priced_results(tracked_records(decorated, listing_state, include_hidden), min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
         total_items = len(filtered)
         items = filtered[(page-1)*limit:page*limit]
     except ValueError as exc:
@@ -131,7 +134,7 @@ async def get_result_file_content(
 @router.get("/{filename}/insights")
 async def get_result_file_insights(filename: str, ai_recommended_only: bool = False,
         keyword_recommended_only: bool = False, recommended_only: bool = False, include_hidden: bool = False,
-        min_price: float | None = Query(None, ge=0), max_price: float | None = Query(None, ge=0), exclude_low_price: bool = True):
+        min_price: float | None = Query(None, ge=0), max_price: float | None = Query(None, ge=0), exclude_low_price: bool = True, listing_state: Literal["active", "sold"] = "active"):
     try:
         validate_result_filename(filename)
         if ai_recommended_only and keyword_recommended_only:
@@ -140,7 +143,7 @@ async def get_result_file_insights(filename: str, ai_recommended_only: bool = Fa
             raise ValueError('最低价不能高于最高价')
         return await result_price_insights(filename, ai_recommended_only=ai_recommended_only or (recommended_only and not keyword_recommended_only),
             keyword_recommended_only=keyword_recommended_only, include_hidden=include_hidden,
-            min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
+            min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price, listing_state=listing_state)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
@@ -155,6 +158,7 @@ async def export_result_file_content(
     min_price: float | None = Query(None, ge=0),
     max_price: float | None = Query(None, ge=0),
     exclude_low_price: bool = Query(True),
+    listing_state: Literal["active", "sold"] = "active",
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
 ):
@@ -171,11 +175,11 @@ async def export_result_file_content(
             keyword_recommended_only=keyword_recommended_only,
             sort_by=sort_by,
             sort_order=sort_order,
-            include_hidden=include_hidden,
+            include_hidden=include_hidden or listing_state=='sold', include_visibility=True,
         )
         if min_price is not None and max_price is not None and min_price > max_price:
             raise ValueError('最低价不能高于最高价')
-        results, _ = select_priced_results(results, min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
+        results, _ = select_priced_results(tracked_records(results, listing_state, include_hidden), min_price=min_price, max_price=max_price, exclude_low_price=exclude_low_price)
         csv_text = build_results_csv(
             apply_filtered_market_context(enrich_records_with_price_insight(results, filename), results)
         )
