@@ -98,9 +98,9 @@ else:
         docker('exec','-i',name,'python','-',input=client_script)
         assert (fixture/'data/.session_secret').stat().st_mode & 0o777==0o600
         assert docker('exec',name,'id','-u').strip()=='1000'
-        for module in ['market_runner.py','market_statistics_service.py','item_lifecycle_service.py']:
-            expected=hashlib.sha256((ROOT/'src/services'/module).read_bytes()).hexdigest()
-            code=f"import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/src/services/{module}').read_bytes()).hexdigest())"
+        for module in ['src/app.py','src/api/auth.py','src/api/routes/results.py','src/services/result_price_summary_service.py']:
+            expected=hashlib.sha256((ROOT/module).read_bytes()).hexdigest()
+            code=f"import hashlib,pathlib;print(hashlib.sha256(pathlib.Path('/app/{module}').read_bytes()).hexdigest())"
             assert docker('exec',name,'python','-c',code).strip()==expected
         docker('exec','-i',name,'python','-',input="""import asyncio
 from playwright.async_api import async_playwright
@@ -116,10 +116,32 @@ asyncio.run(main())
         docker('restart',name)
         docker('exec','-i',name,'python','-',input=client_script)
 
+        # Recreate only this fixture app in home mode; existing data stays mounted.
+        docker('rm','-f',name)
+        docker('run','-d','--name',name,'--network',network,'--network-alias','app',
+               '--env-file',str(fixture/'.env'),'-e','APP_DATABASE_FILE=/app/data/app.sqlite3',
+               '-e','WEB_AUTH_ENABLED=false',*mounts,image)
+        proxy=name+'-gateway'
+        caddy='caddy:2.11.2-alpine@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d'
+        docker('run','-d','--name',proxy,'--network',network,'-e','NO_PROXY=app,localhost,127.0.0.1',
+               '-v',f'{ROOT}/deploy/lan/Caddyfile.home:/etc/caddy/Caddyfile:ro',caddy)
+        docker('exec','-i',name,'python','-',input=f"""import json,time,urllib.request
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({{}}))
+base='http://{proxy}'
+for _ in range(100):
+    try:
+        with opener.open(base+'/auth/session',timeout=2) as response:
+            assert json.load(response)['authentication_required'] is False
+        break
+    except OSError: time.sleep(.2)
+else: raise AssertionError('home gateway not ready')
+with opener.open(base+'/api/results/files',timeout=5) as response: assert response.status==200
+""")
+
     finally:
         result=subprocess.run(['docker','--host=unix:///var/run/docker.sock','logs',name],capture_output=True,text=True)
         (tmp_path/'docker-fixture.log').write_text(result.stdout+result.stderr)
-        subprocess.run(['docker','--host=unix:///var/run/docker.sock','rm','-f',name],capture_output=True)
+        subprocess.run(['docker','--host=unix:///var/run/docker.sock','rm','-f',name+'-gateway',name],capture_output=True)
         subprocess.run(['docker','--host=unix:///var/run/docker.sock','network','rm',network],capture_output=True)
 
 
@@ -138,5 +160,7 @@ def test_source_lan_compose_keeps_gateway_only_binding(tmp_path):
     assert 'ports' not in app
     assert app['build']['dockerfile']=='Dockerfile.sentinel'
     assert proxy['ports']==[{'mode':'ingress','host_ip':'192.168.9.202','target':80,'published':'8000','protocol':'tcp'}]
-    assert proxy['environment']['GATEWAY_PASSWORD_HASH']==hashed.replace('$','$$')
+    assert 'GATEWAY_PASSWORD_HASH' not in proxy.get('environment',{})
+    assert app['environment']['WEB_AUTH_ENABLED']=='false'
+    assert proxy['volumes'][0]['source'].endswith('Caddyfile.home')
     assert proxy['image'].endswith('@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d')

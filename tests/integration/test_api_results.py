@@ -414,3 +414,35 @@ def test_results_blacklist_rules_hide_items_from_view_and_insights(tmp_path, mon
     assert download_resp.status_code == 200
     assert "MacBook Air Intel i5 8+256" in download_resp.text
     assert "MacBook Pro Intel 13寸" in download_resp.text
+
+
+def test_price_distribution_and_cards_export_share_filters(tmp_path, monkeypatch):
+    import asyncio
+    from src.services.result_storage_service import save_result_record
+    monkeypatch.chdir(tmp_path)
+    async def seed():
+        for index, price in enumerate([25,5000,5100,5200,5300,5400]):
+            await save_result_record({'爬取时间':'2026-10-30T09:00:00','搜索关键字':'mini','商品信息':{
+                '商品ID':str(index),'商品标题':'Offline fixture','当前售价':str(price),
+                '商品链接':f'https://www.goofish.com/item?id={index}'},
+                'ai_analysis':{'is_recommended': index==2,'analysis_source':'ai'}}, 'mini')
+    asyncio.run(seed())
+    app=FastAPI()
+    app.include_router(results.router)
+    client=TestClient(app)
+    filename='mini_full_data.jsonl'
+    cards=client.get(f'/api/results/{filename}',params={'limit':2}).json()
+    stats=client.get(f'/api/results/{filename}/insights').json()
+    assert cards['total_items']==5 and len(cards['items'])==2
+    assert stats['market_summary']['sample_count']==5
+    assert stats['market_summary']['avg_price']==5200
+    assert sum(b['count'] for b in stats['price_distribution'])==5
+    assert stats['price_filter']['excluded_count']==1
+    assert all(r['price_insight']['market_avg_price']==5200 for r in cards['items'])
+    selected=client.get(f'/api/results/{filename}/insights',params={'ai_recommended_only':True}).json()
+    assert selected['market_summary']['sample_count']==1
+    assert client.get(f'/api/results/{filename}',params={'exclude_low_price':False}).json()['total_items']==6
+    assert client.get(f'/api/results/{filename}/insights',params={'min_price':5300,'max_price':5100}).status_code==400
+    exported=client.get(f'/api/results/{filename}/export',params={'min_price':5100,'max_price':5300})
+    import csv, io
+    assert len(list(csv.DictReader(io.StringIO(exported.text))))==3

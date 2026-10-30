@@ -71,12 +71,11 @@ class ItemAnalysisDispatcher:
 
     async def _process_job(self, job: ItemAnalysisJob) -> None:
         record = copy.deepcopy(job.final_record)
-        item_data = record.get("商品信息", {}) or {}
         record["卖家信息"] = await self._load_seller_info(job)
         record["ai_analysis"] = await self._build_analysis_result(job, record)
         if await self._saver(record, job.keyword):
             self.completed_count += 1
-        await self._notify_if_recommended(item_data, record["ai_analysis"])
+        # Recommendations stay in the results; notifications are one price summary per completed run.
 
     async def _load_seller_info(self, job: ItemAnalysisJob) -> dict:
         seller_info = {}
@@ -105,7 +104,7 @@ class ItemAnalysisDispatcher:
         return {
             "analysis_source": "ai",
             "is_recommended": True,
-            "reason": "商品已跳过AI分析，直接通知",
+            "reason": "商品已跳过AI分析，保留结果；任务结束后推送均价摘要",
             "keyword_hit_count": 0,
         }
 
@@ -163,11 +162,3 @@ class ItemAnalysisDispatcher:
                     os.remove(img_path)
             except Exception as exc:
                 print(f"   [图片] 删除图片文件时出错: {exc}")
-
-    async def _notify_if_recommended(self, item_data: dict, analysis_result: dict) -> None:
-        if not analysis_result.get("is_recommended"):
-            return
-        try:
-            await self._notifier(item_data, analysis_result.get("reason", "无"))
-        except Exception as exc:
-            print(f"   [通知] 发送推荐通知失败: {exc}")

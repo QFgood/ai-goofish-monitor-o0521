@@ -21,6 +21,10 @@ TTL = 12 * 3600
 _attempts = {}
 
 
+def auth_enabled():
+    return os.getenv('WEB_AUTH_ENABLED', 'true').strip().lower() not in {'false', '0', 'no', 'off'}
+
+
 def credentials_ready():
     password = config.settings.web_password
     return bool(config.settings.web_username.strip() and len(password) >= 12 and password not in {'admin123', 'changeme123456'})
@@ -61,6 +65,8 @@ def issue_session(username):
 
 
 def session_user(connection):
+    if not auth_enabled():
+        return '家庭局域网'
     if not credentials_ready():
         return None
     token = connection.cookies.get(COOKIE, '')

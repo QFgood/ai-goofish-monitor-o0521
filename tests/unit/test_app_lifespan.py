@@ -66,3 +66,18 @@ def test_lifespan_cleans_task_logs_on_startup(monkeypatch):
     assert called["keep_days"] == 9
     assert fake_scheduler.stopped is True
     assert fake_process.stop_all_called is True
+
+
+def test_lifespan_does_not_resume_retired_market_jobs(monkeypatch):
+    from types import SimpleNamespace
+    fake_app=SimpleNamespace(state=SimpleNamespace())
+    monkeypatch.setattr(app_module,'scheduler_service',_FakeSchedulerService())
+    monkeypatch.setattr(app_module,'process_service',_FakeProcessService())
+    monkeypatch.setattr(app_module,'TaskService',_FakeTaskService)
+    monkeypatch.setattr(app_module,'SqliteTaskRepository',lambda:object())
+    monkeypatch.setattr(app_module,'bootstrap_sqlite_storage',lambda:None)
+    monkeypatch.setattr(app_module,'cleanup_task_logs',lambda **_:None)
+    async def run():
+        async with app_module.lifespan(fake_app):
+            assert fake_app.state.market_runner is None
+    asyncio.run(run())

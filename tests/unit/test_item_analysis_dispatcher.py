@@ -73,7 +73,7 @@ def test_item_analysis_dispatcher_uses_bounded_concurrency():
     dispatcher = asyncio.run(run())
     assert dispatcher.completed_count == 3
     assert len(saved_records) == 3
-    assert len(notifications) == 3
+    assert notifications == []  # Per-item pushes replaced by one run-level price summary.
     assert max_active_ai_calls == 2
     assert saved_records[0][1]["卖家信息"]["卖家ID"].startswith("seller-")
 

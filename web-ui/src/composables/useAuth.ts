@@ -5,6 +5,7 @@ import { wsService } from '@/services/websocket'
 // Global State
 const username = ref<string | null>(localStorage.getItem('auth_username'))
 const isLoggedIn = ref(localStorage.getItem('auth_logged_in') === 'true')
+const authenticationRequired = ref(true)
 let sessionCheck: Promise<void> | null = null
 
 export function useAuth() {
@@ -45,7 +46,7 @@ export function useAuth() {
     if (!sessionCheck) sessionCheck = (async () => {
       try {
         const response = await fetch('/auth/session')
-        if (response.ok) { const data = await response.json(); setAuthenticated(data.username); return }
+        if (response.ok) { const data = await response.json(); authenticationRequired.value = data.authentication_required !== false; setAuthenticated(data.username); return }
       } catch { /* API requests will still fail closed when offline. */ }
       username.value = null; isLoggedIn.value = false
       localStorage.removeItem('auth_username'); localStorage.removeItem('auth_logged_in')
@@ -82,6 +83,7 @@ export function useAuth() {
   return {
     username,
     isAuthenticated,
+    authenticationRequired,
     login,
     checkSession,
     logout

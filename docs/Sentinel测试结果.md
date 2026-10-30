@@ -1,3 +1,5 @@
+> **历史 PR #2 文档。** 当前版本已移除独立市场页面与自动回访，推送和家庭 LAN 认证策略也已调整；请以 [当前操作与部署说明](结果价格分布与家庭LAN免登录.md) 为准。以下保留作历史实现及测试记录。
+
 # Goofish Sentinel v1.0 Cloud 测试结果
 
 日期：2026-10-30（Asia/Shanghai）。功能分支：`feat/goofish-sentinel-v1`，从本 Fork 的 `77f8d758` 开发，交付前同步了 master 的 `f8256f2e`（已合入 LAN 网关 PR #1），保留原有局域网配置。

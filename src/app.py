@@ -84,22 +84,15 @@ async def lifespan(app: FastAPI):
     await scheduler_service.reload_jobs(tasks_list)
     scheduler_service.start()
 
-    market_runner = None
+    # Standalone market discovery/revisit was retired. Keep tables and read APIs
+    # for existing history, but never resume those jobs after an upgrade.
     if app is not None:
-        from src.infrastructure.persistence.market_repository import MarketRepository
-        from src.services.market_runner import MarketRunner
-        from src.services.notification_service import build_notification_service
-        market_runner = MarketRunner(MarketRepository(), notifier=build_notification_service().send_notification)
-        app.state.market_runner = market_runner
-        market_runner.start()
+        app.state.market_runner = None
     print("应用启动完成")
 
     try:
         yield
     finally:
-        if market_runner:
-            await market_runner.stop()
-
         # Shut down legacy services even when lifespan exits with an error.
         print("正在关闭应用...")
         scheduler_service.stop()
@@ -163,6 +156,8 @@ async def auth_status(payload: LoginRequest, request: Request, response: Respons
     import hmac
     if not auth.same_origin(request):
         raise HTTPException(403, "跨站登录已拒绝")
+    if not auth.auth_enabled():
+        return {'authenticated': True, 'username': '家庭局域网', 'authentication_required': False}
     auth.check_login_rate(request)
     if not auth.credentials_ready():
         raise HTTPException(503, "请先设置至少12位的非默认 WEB_PASSWORD")
@@ -177,7 +172,7 @@ async def auth_status(payload: LoginRequest, request: Request, response: Respons
 
 @app.get('/auth/session')
 async def auth_session(request: Request):
-    return {'authenticated': True, 'username': auth.require_user(request)}
+    return {'authenticated': True, 'username': auth.require_user(request), 'authentication_required': auth.auth_enabled()}
 
 
 @app.post('/auth/logout')

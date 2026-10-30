@@ -1,0 +1,9 @@
+{
+	auto_https off
+	admin off
+}
+
+# Trusted home LAN only; host port remains bound to the explicit private IP.
+http://:80 {
+	reverse_proxy app:8000
+}

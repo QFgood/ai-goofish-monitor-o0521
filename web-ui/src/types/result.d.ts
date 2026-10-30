@@ -66,6 +66,11 @@ export interface PriceInsight {
 }
 
 export interface ResultInsights {
+  price_distribution?: Array<{ min_price: number; max_price: number; count: number; item_ids: string[] }>;
+  price_filter?: { excluded_count: number; low_price_threshold: number | null; rule: string };
+  summary_scope?: string;
+  history_basis?: string;
+  price_note?: string;
   market_summary: {
     sample_count: number;
     avg_price: number | null;

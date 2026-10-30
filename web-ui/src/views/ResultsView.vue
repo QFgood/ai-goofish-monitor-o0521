@@ -23,6 +23,9 @@ const {
   files,
   selectedFile,
   results,
+  totalItems,
+  page,
+  limit,
   insights,
   filters,
   isLoading,
@@ -155,9 +158,19 @@ async function handleSaveBlacklistRules() {
       @delete="openDeleteDialog"
     />
 
-    <ResultsInsightsPanel :insights="insights" :selected-task-label="selectedTaskLabel" />
+    <div class="app-surface p-4 mb-6 flex flex-wrap items-end gap-4">
+      <label class="text-sm">最低挂牌价（元）<input v-model.lazy.number="filters.min_price" type="number" min="0" step="0.01" class="block rounded-lg border bg-transparent p-2 w-36" placeholder="不限"/></label>
+      <label class="text-sm">最高挂牌价（元）<input v-model.lazy.number="filters.max_price" type="number" min="0" step="0.01" class="block rounded-lg border bg-transparent p-2 w-36" placeholder="不限"/></label>
+      <label class="text-sm flex gap-2 items-center"><input v-model="filters.exclude_low_price" type="checkbox"/>排除疑似低价引流（至少5件样本，低于中位数20%）</label>
+      <Button variant="outline" @click="filters.min_price=undefined;filters.max_price=undefined">清除价格范围</Button>
+    </div>
+    <ResultsInsightsPanel :insights="insights" :selected-task-label="selectedTaskLabel" @select-range="(min,max)=>{filters.min_price=min;filters.max_price=max}" />
 
     <ResultsGrid :results="results" :is-loading="isLoading" @toggle-block="toggleItemBlock" />
+    <div class="flex flex-wrap justify-between gap-3 items-center mt-5 text-sm text-slate-500">
+      <span>共 {{totalItems}} 件 · 第 {{page}} 页（每页 {{limit}} 件）；上方柱状图统计全部筛选结果。</span>
+      <div class="flex gap-2"><Button variant="outline" :disabled="isLoading || page<=1" @click="page--">上一页</Button><Button variant="outline" :disabled="isLoading || page*limit>=totalItems" @click="page++">下一页</Button></div>
+    </div>
 
     <Dialog v-model:open="isDeleteDialogOpen">
       <DialogContent class="sm:max-w-[420px]">
